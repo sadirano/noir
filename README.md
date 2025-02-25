@@ -65,15 +65,6 @@ These scripts help you create or edit scripts using Neovim.
     e myscript.cmd
     ```
 
-- **sad.cmd**  
-  **Purpose:**  
-  - Similar to `e.cmd`, it opens a file in Neovim after changing to the script's directory.
-  
-  **Usage Example:**  
-    ```batch
-    sad myscript.cmd
-    ```
-
 ### 2. Administrative Utilities
 These scripts ensure proper permissions are available when needed.
 
@@ -107,36 +98,7 @@ These scripts ensure proper permissions are available when needed.
     hosts
     ```
 
-### 3. File & Directory Operations
-Scripts in this category assist with file management tasks.
-
-- **ct.cmd**  
-  **Purpose:**  
-  - Copies a file or directory from a source to a destination.
-  - Uses **robocopy** for directories to provide a more robust copy process and uses the standard `copy` command for individual files.
-  
-  **Usage Examples:**  
-  - **Copy a Directory:**  
-    ```batch
-    ct "C:\SourceFolder" "C:\DestinationFolder"
-    ```
-  - **Copy a Single File:**  
-    ```batch
-    ct "C:\source\file.txt" "C:\destination"
-    ```
-
-- **n.cmd**  
-  **Purpose:**  
-  - Creates or appends a note to a file in a sibling directory called `note`.
-  - Creates the directory if it doesn't exist.
-  
-  **Usage Example:**  
-    ```batch
-    n mynote.txt This is a note.
-    ```
-    This command will create or append to the file `..\note\mynote.txt`.
-
-### 4. Miscellaneous Utilities
+### 3. Miscellaneous Utilities
 These scripts offer additional utilities to enhance your workflow.
 
 - **fn.cmd**  
@@ -186,7 +148,7 @@ These scripts offer additional utilities to enhance your workflow.
     restart
     ```
 
-### 5. Navigation Utilities
+### 4. Navigation Utilities
 This new script provides a single entry point to navigate to a folder or file, offering multiple actions based on the provided arguments.
 
 - **o.cmd**  
