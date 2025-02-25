@@ -125,15 +125,6 @@ Scripts in this category assist with file management tasks.
     ct "C:\source\file.txt" "C:\destination"
     ```
 
-- **ls.cmd**  
-  **Purpose:**  
-  - Lists all files in the current directory using a simple `for` loop with `dir /b /a`.
-  
-  **Usage Example:**  
-    ```batch
-    ls
-    ```
-
 - **n.cmd**  
   **Purpose:**  
   - Creates or appends a note to a file in a sibling directory called `note`.
@@ -147,15 +138,6 @@ Scripts in this category assist with file management tasks.
 
 ### 4. Miscellaneous Utilities
 These scripts offer additional utilities to enhance your workflow.
-
-- **cc.cmd**  
-  **Purpose:**  
-  - Copies the current directory path (using `cd`) to the clipboard.
-  
-  **Usage Example:**  
-    ```batch
-    cc
-    ```
 
 - **fn.cmd**  
   **Purpose:**  
@@ -249,6 +231,5 @@ This new script provides a single entry point to navigate to a folder or file, o
   - **Neovim (nvim):** Must be installed and available in your system's PATH.
   - **Everything CLI (es):** Required for `fn.cmd` to work.
   - **fzf:** Used in conjunction with `es` in `fn.cmd`.
-  - **Python:** Needed for `m.cmd` (if you use it for message display).
   - **Scoop:** Recommended for installing any missing tools.
 
