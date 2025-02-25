@@ -1,3 +1,3 @@
 @echo off
 title Noir Core
-o %0 %~dpn0 %~dp0 %*.cmd
+omni %0 %~dpn0 %~dp0 %*.cmd
