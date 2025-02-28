@@ -20,25 +20,6 @@ This repository contains a set of lightweight Windows CMD scripts designed to st
 ### 1. Script Creation & Editing
 These scripts help you create or edit scripts using Neovim.
 
-- **a.cmd**  
-  **Purpose:**  
-  - Appends text to a file if arguments are provided.
-  - If no additional text is provided, it opens the specified file in Neovim for editing.
-  - Automatically creates the directory for the file if it doesn't exist.
-  
-  **Usage Examples:**  
-  - **Edit a Script:**  
-    ```batch
-    a C:\Scripts\myscript.cmd
-    ```
-    This opens `myscript.cmd` in Neovim for editing.
-  
-  - **Append Text to a Script:**  
-    ```batch
-    a C:\Scripts\myscript.cmd echo Hello World!
-    ```
-    This appends "echo Hello World!" to the file.
-
 - **c.cmd**  
   **Purpose:**  
   - Opens a file in Neovim.  
@@ -55,15 +36,6 @@ These scripts help you create or edit scripts using Neovim.
     c
     ```
     This opens the current directory in Neovim.
-
-- **e.cmd**  
-  **Purpose:**  
-  - Opens one or more specified files in Neovim for editing.
-  
-  **Usage Example:**  
-    ```batch
-    e myscript.cmd
-    ```
 
 ### 2. Administrative Utilities
 These scripts ensure proper permissions are available when needed.
@@ -111,34 +83,6 @@ These scripts offer additional utilities to enhance your workflow.
     ```
     *Make sure you have the Everything CLI (`es`) and fzf installed for this to work.*
 
-- **h.cmd**  
-  **Purpose:**  
-  - Puts the computer to sleep using a DLL call.
-  
-  **Usage Example:**  
-    ```batch
-    h
-    ```
-
-- **noir.cmd**  
-  **Purpose:**  
-  - Opens a new CMD prompt in the parent directory of the current location.
-  - Sets a custom window title (`Noir`) and clears the screen for a clean appearance.
-  
-  **Usage Example:**  
-    ```batch
-    noir
-    ```
-
-- **q.cmd**  
-  **Purpose:**  
-  - Exits the current command prompt session.
-  
-  **Usage Example:**  
-    ```batch
-    q
-    ```
-
 - **restart.cmd**  
   **Purpose:**  
   - Restarts Windows Explorer by forcefully terminating it and then restarting it.
@@ -151,7 +95,7 @@ These scripts offer additional utilities to enhance your workflow.
 ### 4. Navigation Utilities
 This new script provides a single entry point to navigate to a folder or file, offering multiple actions based on the provided arguments.
 
-- **o.cmd**  
+- **omni.cmd** (outdated: see omni /? for updated help)
   **Purpose:**  
   - Allows you to change to a desired destination folder using a single command.
   - When launched from the Start Menu, it opens the Command Prompt directly at the specified folder.
@@ -162,23 +106,23 @@ This new script provides a single entry point to navigate to a folder or file, o
   **Sample Usage:**  
   - **Open Command Prompt at a Folder:**  
     ```batch
-    o %0 %~dpn0 "C:\Desired\Destination"
+    omni %0 %~dpn0 "C:\Desired\Destination"
     ```
     This opens a new Command Prompt in `C:\Desired\Destination`.
   
   - **Open the Folder in Windows Explorer:**  
     ```batch
-    o %0 %~dpn0 "C:\Desired\Destination" -s
+    omni %0 %~dpn0 "C:\Desired\Destination" -s
     ```
   
   - **Open the Folder in Neovim:**  
     ```batch
-    o %0 %~dpn0 "C:\Desired\Destination" -n
+    omni %0 %~dpn0 "C:\Desired\Destination" -n
     ```
   
   - **Open a Specific File in Neovim:**  
     ```batch
-    o %0 %~dpn0 "C:\Desired\Destination" "filename.txt"
+    omni %0 %~dpn0 "C:\Desired\Destination" "filename.txt"
     ```
     *Here, `%0` is the script name, `%~dpn0` represents the current path, `"C:\Desired\Destination"` is the destination folder, and the fourth parameter is either an option or a file name.*
 

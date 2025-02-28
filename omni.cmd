@@ -5,40 +5,61 @@ if "%~1"=="/?" (
     goto :help
 )
 
-:: Create the destination folder (%3) if it doesn't exist
-mkdir %3 2>nul
+set name=%~1
+set fullname=%~2
+set destination=%~3
+set option=%4
+set option_extras=%5
 
-pushd %3 
+mkdir %destination% 2>nul
 
-set "arg=%~4"
+pushd %destination% 
 
-if /i "%arg:~0,2%"=="-s" (
+set "option=%~4"
+if not defined option set option=.cmd
+
+if /i "%option:~0,2%"=="-s" (
     start . & goto :EOF
 )
 
-if /i "%arg:~0,2%"=="-n" (
+if /i "%option:~0,2%"=="-n" (
     nvim . 
     popd
     goto :EOF
 )
 
-if /i "%arg:~0,2%"=="-c" (
-    cd | clip
-    goto :EOF
+if /i "%option%"=="/" (
+  goto :searchContent
 )
 
-if not "%arg:~0,1%"=="." (
-    nvim "%arg%"
+if /i "%option%"=="\" (
+  goto :searchFile
+)
+
+if not "%option:~0,1%"=="." (
+    nvim "%option%"
     popd
     goto :EOF
 )
 
 :: Because the Start Menu passes the complete file path,
 :: while the command line just passes the file name.
-if /i "%~1"=="%~2.cmd" (
+if /i "%name%"=="%fullname%.cmd" (
     start "" cmd /k
 )
 
+goto :EOF
+
+:searchContent
+set rgCmd=rg %option_extras%
+set fzfCmd=fzf --bind "enter:become(nvim {}),ctrl-e:become(start {})"
+%rgCmd% | %fzfCmd%
+goto :EOF
+
+:searchFile
+set esCmd=es -p -parent-path %destination% %option_extras%
+set fzfCmd=fzf --bind "enter:become(nvim {}),ctrl-e:become(start explorer {})"
+%esCmd% | %fzfCmd%
 goto :EOF
 
 :help
@@ -55,6 +76,7 @@ echo   ^<script^>      : Full path of this script (e.g., %%~0).
 echo   ^<scriptBase^>  : Base name of the script (e.g., %%~dpn0).
 echo   ^<destination^> : Folder to navigate to. This folder will be created if it does not already exist.
 echo   [option]        : Optional argument that determines the action.
+echo   [option_extras] : Optional argument that complements an option.
 echo.
 echo OPTIONS:
 echo   -s    : Open the destination folder in the default file explorer.
@@ -63,9 +85,12 @@ echo   -n    : Open the destination folder in Nvim.
 echo           NOTE: When using -n, the script returns to the original directory after launching Nvim.
 echo   -c    : Copy the current directory path to the clipboard.
 echo           NOTE: When using -c, the current directory remains changed to the destination folder.
+echo    / ^<text^>
+echo         : Search for the text provided and allows the user to open the file in Nvim 
+echo    \ ^<text^>
+echo         : Search for the file name and path, allows opening it in Nvim or Explorer
 echo   ^<filename^>
-echo         : Open the specified file in Nvim (provided the file argument
-echo           does not begin with a dot).
+echo         : Open the specified file in Nvim (provided the file does not begin with a dot).
 echo           NOTE: When opening a file, the script returns to the original directory after launching Nvim.
 echo.
 echo SPECIAL CASE:
