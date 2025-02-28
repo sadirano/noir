@@ -1,0 +1,3 @@
+cc=cd ^| clip
+q=exit
+
