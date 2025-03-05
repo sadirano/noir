@@ -7,6 +7,10 @@ PowerShell -Command "irm https://get.scoop.sh | iex"
 
 :: Essentials
 
+::  - Aria2: Multi-connection downloads
+call scoop install aria2
+scoop config aria2-warning-enabled false
+
 ::  - Git
 call scoop install git
 
@@ -24,6 +28,7 @@ call scoop install clink
 clink inject
 clink autorun install
 clink set clink.autostart C:\Windows\System32\doskey.exe /macrofile=%~dp0noir/doskey.mac
+clink set clink.logo none
 
 :: Optionals
 
