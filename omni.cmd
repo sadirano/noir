@@ -1,5 +1,4 @@
 @echo off
-cls
 
 if "%~1"=="/?" (
     goto :help
@@ -7,14 +6,26 @@ if "%~1"=="/?" (
 
 set name=%~1
 set fullname=%~2
-set destination=%~3
+set destination_arg=%~3
 set option=%4
 set option_extras=%5
 
+set temp_dest=%temp%\dest.temp
+
+:: Isolate Locals
+setlocal EnableDelayedExpansion
+if not defined directories_env set directories_env=%userprofile%\.noir\directories.env
+call :loadenvs
+if defined dest_%destination_arg% echo !dest_%destination_arg%! > %temp_dest%
+endlocal
+:: Isolate 
+
+if exist %temp_dest% set /p destination=<%temp_dest% 
+del %temp_dest% 
+if not defined destination set destination=%destination_arg%
+
 mkdir %destination% 2>nul
-
-pushd %destination% 
-
+pushd %destination%
 set "option=%~4"
 if not defined option set option=.cmd
 
@@ -115,3 +126,9 @@ echo         (The script returns to the original directory after launching Nvim.
 pause >nul
 goto :EOF
 
+:: Loadenv function
+:loadenvs
+for /f "tokens=1,2 delims==" %%a in ('findstr "=" %directories_env%') do (
+    set "dest_%%a=%%b"
+)
+goto :EOF
