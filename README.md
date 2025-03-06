@@ -2,98 +2,19 @@
 
 This repository contains a set of lightweight Windows CMD scripts designed to streamline your workflow for quickly creating and running scripts with minimal keystrokes. The idea is to use **Win + R** to quickly launch these commands, create new scripts, and execute them with parameters.
 
-> **Usage Workflow Example:**  
-> - **To create a new script:**  
->   1. Press **Win + R**.  
->   2. Type: `c <script name>` and press **Enter**.  
->   3. Neovim opens with a new file for you to edit.  
-> - **To run a script later:**  
->   1. Press **Win + R**.  
->   2. Type: `<script name> <params>` and press **Enter**.
-
 > **Note:** Minimal script names (like `c`, `a`, `n`, etc.) are intentional to reduce keystrokes. While PowerShell is powerful, its requirements (such as always appending `.ps1`) don't align with this fast-launch approach.
 
 ---
 
-## Categories & File Descriptions
-
-### 1. Script Creation & Editing
-These scripts help you create or edit scripts using Neovim.
-
-- **c.cmd**  
-  **Purpose:**  
-  - Opens a file in Neovim.  
-  - If no parameters are given, it opens the current directory in Neovim.
+- **hosts.cmd** Ensures administrative privileges and opens the system hosts file (`C:\Windows\System32\drivers\etc\hosts`) in Neovim.
   
-  **Usage Examples:**  
-  - **Edit a Specific File:**  
-    ```batch
-    c myscript
-    ```
-    This will open `myscript.cmd` in Neovim.
-  - **Open the Current Directory:**  
-    ```batch
-    c
-    ```
-    This opens the current directory in Neovim.
-
-### 2. Administrative Utilities
-These scripts ensure proper permissions are available when needed.
-
-- **adm.cmd**  
-  **Purpose:**  
-  - Checks for administrative rights.
-  - If the current process lacks admin privileges, it relaunches the specified script with elevation via PowerShell.
-  
-  **Usage Example:**  
-    ```batch
-    adm someScript.cmd
-    ```
-    *(Typically used internally by other scripts.)*
-
-- **env.cmd**  
-  **Purpose:**  
-  - Ensures the script is running with administrative privileges (via `adm.cmd`).
-  - Opens the Windows Environment Variables editor.
-  
-  **Usage Example:**  
-    ```batch
-    env
-    ```
-
-- **hosts.cmd**  
-  **Purpose:**  
-  - Ensures administrative privileges and opens the system hosts file (`C:\Windows\System32\drivers\etc\hosts`) in Neovim.
-  
-  **Usage Example:**  
-    ```batch
-    hosts
-    ```
-
-### 3. Miscellaneous Utilities
-These scripts offer additional utilities to enhance your workflow.
-
-- **fn.cmd**  
-  **Purpose:**  
-  - Uses the Everything CLI (`es`) to list files, pipes the output to `fzf` for fuzzy searching, and opens the selected file in Neovim.
+- **fn.cmd**  Uses the Everything CLI (`es`) to list files, pipes the output to `fzf` for fuzzy searching, and opens the selected file in Neovim.
   
   **Usage Example:**  
     ```batch
     fn
     ```
     *Make sure you have the Everything CLI (`es`) and fzf installed for this to work.*
-
-- **restart.cmd**  
-  **Purpose:**  
-  - Restarts Windows Explorer by forcefully terminating it and then restarting it.
-  
-  **Usage Example:**  
-    ```batch
-    restart
-    ```
-
-### 4. Navigation Utilities
-This new script provides a single entry point to navigate to a folder or file, offering multiple actions based on the provided arguments.
 
 - **omni.cmd** (outdated: see omni /? for updated help)
   **Purpose:**  
