@@ -38,10 +38,10 @@ Run it on a fresh machine (plain Windows PowerShell 5.1 is fine):
 .\noir.ps1
 ```
 
-By default it opens an interactive checklist of every setup step — navigate
-with Up/Down (or J/K), Space toggles a step, A toggles all, Enter runs the
-selection, Q quits. Steps are color-coded: Visual (magenta),
-Application/Programs (yellow), Configuration (cyan).
+By default it opens an interactive checklist of every setup step, starting
+with nothing selected — navigate with Up/Down (or J/K), Space toggles a step,
+A toggles all, Enter runs the selection, Q quits. Steps are color-coded:
+Visual (magenta), Application/Programs (yellow), Configuration (cyan).
 
 Fully unattended runs:
 
