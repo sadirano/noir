@@ -647,7 +647,7 @@ public class Wallpaper {
             Write-Host "Setting Windows Terminal as the Default Terminal Application..." -ForegroundColor Cyan
             $delegationPath = "HKCU:\Console\%%Startup"
             if (!(Test-Path $delegationPath)) { New-Item -Path $delegationPath -Force | Out-Null }
-            Set-ItemProperty -Path $delegationPath -Name "DelegationConsole" -Value "{2EACA947-7F5F-4CFA-BA87-8F7FBEEF56EA}" -Type String
+            Set-ItemProperty -Path $delegationPath -Name "DelegationConsole" -Value "{2EACA947-7F5F-4CFA-BA87-8F7FBEEFBE69}" -Type String
             Set-ItemProperty -Path $delegationPath -Name "DelegationTerminal" -Value "{E12CFF52-A866-4C77-9A90-F570A7AA2C6B}" -Type String
 
             $wtSettingsPaths = @(
