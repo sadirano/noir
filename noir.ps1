@@ -933,8 +933,10 @@ public class Wallpaper {
 
 Write-Host "Starting Windows 11 Customization...`n"
 $startIndex = 0
+$explicitStart = $false
 
 if ($StartStep) {
+    $explicitStart = $true
     $parsed = 0
     if ([int]::TryParse($StartStep, [ref]$parsed)) {
         if ($parsed -lt 1 -or $parsed -gt $steps.Length) {
@@ -964,6 +966,7 @@ if ($StartStep) {
             Write-Host "Previous session was interrupted at step '$lastStepName'. Starting there (earlier steps start unchecked; toggle them back on if you want them)." -ForegroundColor Yellow
         }
         $startIndex = $resumeIndex
+        $explicitStart = $true
     }
 }
 
@@ -973,8 +976,10 @@ $menuSelection = $null
 
 if (-not $Yolo -and -not $SetupProfileKey) {
     $preChecked = @()
-    for ($j = $startIndex; $j -lt $steps.Length; $j++) {
-        if (-not $steps[$j].IsGatekeeper) { $preChecked += $steps[$j].Name }
+    if ($explicitStart) {
+        for ($j = $startIndex; $j -lt $steps.Length; $j++) {
+            if (-not $steps[$j].IsGatekeeper) { $preChecked += $steps[$j].Name }
+        }
     }
     $menuSelection = Show-StepMenu -Steps $steps -CheckedNames $preChecked
     if ($null -ne $menuSelection -and $menuSelection.Action -eq "Quit") {
