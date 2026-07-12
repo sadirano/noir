@@ -121,14 +121,14 @@ function Show-StepMenu {
         if ($step.IsGatekeeper) {
             $items += @{ Header = $true; Label = "--- Advanced Developer Tools (heavy, case-by-case) ---" }
         } else {
-            $items += @{ Header = $false; Name = $step.Name; Label = $step.Prompt; Category = $step.Category; Checked = ($CheckedNames -contains $step.Name) }
+            $items += @{ Header = $false; Name = $step.Name; Label = $step.Prompt; Category = $step.Category; Detail = $step.Detail; Checked = ($CheckedNames -contains $step.Name) }
         }
     }
     $selectable = @(0..($items.Count - 1) | Where-Object { -not $items[$_].Header })
     $pos = 0
 
     try {
-        if ([Console]::WindowHeight -lt ($items.Count + 5)) { return $null }
+        if ([Console]::WindowHeight -lt 15) { return $null }
         if ([Console]::WindowWidth -lt 60) { return $null }
         try { [Console]::CursorVisible = $false } catch {}
 
@@ -139,12 +139,18 @@ function Show-StepMenu {
         Write-Host -NoNewline "Application/Programs" -ForegroundColor Yellow
         Write-Host -NoNewline " / "
         Write-Host "Configuration" -ForegroundColor Cyan
+        # Scroll the list inside a viewport when it is taller than the window.
+        $viewRows = [Math]::Min($items.Count, [Console]::WindowHeight - 9)
+        $top = 0
         $drawn = $false
         while ($true) {
-            if ($drawn) { [Console]::SetCursorPosition(0, [Console]::CursorTop - $items.Count) }
+            if ($drawn) { [Console]::SetCursorPosition(0, [Console]::CursorTop - ($viewRows + 3)) }
+            $cursorIdx = $selectable[$pos]
+            if ($cursorIdx -lt $top) { $top = $cursorIdx }
+            if ($cursorIdx -ge $top + $viewRows) { $top = $cursorIdx - $viewRows + 1 }
             $width = [Console]::WindowWidth - 1
             $labelWidth = $width - 26
-            for ($i = 0; $i -lt $items.Count; $i++) {
+            for ($i = $top; $i -lt $top + $viewRows; $i++) {
                 $item = $items[$i]
                 if ($item.Header) {
                     Write-Host ("      $($item.Label)".PadRight($width).Substring(0, $width)) -ForegroundColor DarkGray
@@ -160,6 +166,33 @@ function Show-StepMenu {
                 Write-Host -NoNewline $item.Name.PadRight(19).Substring(0, 19) -ForegroundColor $nameColor
                 Write-Host ((" " + $item.Label).PadRight($labelWidth).Substring(0, $labelWidth)) -ForegroundColor $stateColor
             }
+            # Detail panel: two lines describing the focused item, so the user can
+            # deliberate before toggling. Word-wraps to the real console width;
+            # only a genuinely narrow window ever truncates (with an ellipsis).
+            $focusDetail = [string]$items[$selectable[$pos]].Detail
+            $wrapWidth = $width - 4
+            $detailLines = @("", "")
+            $lineIdx = 0
+            foreach ($word in ($focusDetail -split ' ')) {
+                $candidate = if ($detailLines[$lineIdx]) { "$($detailLines[$lineIdx]) $word" } else { $word }
+                if ($candidate.Length -le $wrapWidth) {
+                    $detailLines[$lineIdx] = $candidate
+                } else {
+                    $lineIdx++
+                    if ($lineIdx -ge 2) {
+                        $keep = [Math]::Max(0, [Math]::Min($detailLines[1].Length, $wrapWidth - 3))
+                        $detailLines[1] = $detailLines[1].Substring(0, $keep) + "..."
+                        break
+                    }
+                    $detailLines[$lineIdx] = $word
+                }
+            }
+            foreach ($line in $detailLines) {
+                Write-Host ("    $line".PadRight($width).Substring(0, $width)) -ForegroundColor Gray
+            }
+            $checkedCount = @($items | Where-Object { -not $_.Header -and $_.Checked }).Count
+            $scrollHint = if ($items.Count -gt $viewRows) { " | showing $($top + 1)-$($top + $viewRows) of $($items.Count)" } else { "" }
+            Write-Host ("  $checkedCount selected$scrollHint".PadRight($width).Substring(0, $width)) -ForegroundColor DarkGray
             $drawn = $true
 
             $key = [Console]::ReadKey($true).Key
@@ -188,7 +221,7 @@ function Show-StepMenu {
 }
 
 function Confirm-Action {
-    param([string]$StepName = "", [string]$Prompt)
+    param([string]$StepName = "", [string]$Prompt, [string]$Detail = "")
 
     if ($Yolo) {
         Write-Host "$Prompt [Auto-Confirmed: Yes]" -ForegroundColor DarkGreen
@@ -208,6 +241,7 @@ function Confirm-Action {
         }
     }
 
+    if ($Detail) { Write-Host "  $Detail" -ForegroundColor DarkGray }
     Write-Host -NoNewline "$Prompt "
 
     try {
@@ -237,6 +271,7 @@ $steps = @(
         Name = "dark-mode"
         Category = "Visual"
         Prompt = "Enable Dark Mode?"
+        Detail = "Switches apps and system UI to the dark theme (per-user registry). Skip if you prefer light mode."
         Action = {
             Write-Host "Applying Dark Mode..." -ForegroundColor Cyan
             Set-ItemProperty -Path "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Themes\Personalize" -Name "AppsUseLightTheme" -Value 0 -Type DWord
@@ -247,6 +282,7 @@ $steps = @(
         Name = "hide-desktop-icons"
         Category = "Visual"
         Prompt = "Hide Desktop Icons?"
+        Detail = "Hides every icon for a clean desktop; the files stay in your Desktop folder and reappear if you toggle back. Skip if you launch things from the desktop."
         Action = {
             Write-Host "Hiding Desktop Icons..." -ForegroundColor Cyan
             Set-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced" -Name "HideIcons" -Value 1 -Type DWord
@@ -256,6 +292,7 @@ $steps = @(
         Name = "remove-search-bar"
         Category = "Visual"
         Prompt = "Remove Search Bar from Taskbar?"
+        Detail = "Hides the taskbar search box; searching still works by pressing Start and typing. Skip if you click the search box."
         Action = {
             Write-Host "Removing Search Bar..." -ForegroundColor Cyan
             Set-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Search" -Name "SearchboxTaskbarMode" -Value 0 -Type DWord
@@ -265,6 +302,7 @@ $steps = @(
         Name = "clear-taskbar"
         Category = "Visual"
         Prompt = "Remove all shortcuts from the taskbar?"
+        Detail = "Unpins everything for a minimal taskbar - the Noir workflow launches apps from Win+R instead. Repin favorites anytime. Skip if you rely on pins."
         Action = {
             Write-Host "Removing Taskbar Pinned Items..." -ForegroundColor Cyan
             $taskbandPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Taskband"
@@ -277,6 +315,7 @@ $steps = @(
         Name = "taskbar-autohide"
         Category = "Visual"
         Prompt = "Enable Auto-Hide for Taskbar?"
+        Detail = "The taskbar slides away until the mouse touches the screen edge, freeing vertical space. Skip if you glance at the clock/tray a lot."
         Action = {
             Write-Host "Enabling Taskbar Auto-hide..." -ForegroundColor Cyan
             $stuckRects3Path = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\StuckRects3"
@@ -294,6 +333,7 @@ $steps = @(
         Name = "black-wallpaper"
         Category = "Visual"
         Prompt = "Change Wallpaper to Solid Black?"
+        Detail = "Solid black background - the noir look, easy on OLEDs, zero distraction. Skip to keep your current wallpaper."
         Action = {
             Write-Host "Setting Wallpaper to Solid Black..." -ForegroundColor Cyan
             Set-ItemProperty -Path "HKCU:\Control Panel\Desktop" -Name "WallPaper" -Value ""
@@ -315,6 +355,7 @@ public class Wallpaper {
         Name = "nags-and-ads"
         Category = "Configuration"
         Prompt = "Disable 'finish setting up' nag screens and ad personalization?"
+        Detail = "Registry opt-outs for the 'finish setting up your device' screen, tips, and personalized-ads ID. Purely less noise; rarely worth skipping."
         Action = {
             Write-Host "Disabling setup nag screens and ad personalization..." -ForegroundColor Cyan
             # Disable 'Let's finish setting up your device'
@@ -333,6 +374,7 @@ public class Wallpaper {
         Name = "noir-path"
         Category = "Configuration"
         Prompt = "Add Noir's 'core' commands and 'user' scripts folders to your PATH?"
+        Detail = "Puts core\ (adm, env, hosts, mk, u, ...) and your personal user\ folder on the user PATH so they run from Win+R or any shell. Most of Noir assumes this."
         Action = {
             $noirDir = $PSScriptRoot
             $coreDir = Join-Path $noirDir "core"
@@ -365,6 +407,7 @@ public class Wallpaper {
         Name = "core-macros"
         Category = "Configuration"
         Prompt = "Register Noir core macros (doskey cc/q for cmd, q/cc functions for PowerShell)?"
+        Detail = "Appends doskey.mac to cmd's AutoRun and dot-sources core.ps1 from your PowerShell profiles: cc copies the current path to the clipboard, q exits the shell. Skip if you curate your own profiles."
         Action = {
             $coreDir = Join-Path $PSScriptRoot "core"
 
@@ -409,6 +452,7 @@ public class Wallpaper {
         Name = "scoop-nix"
         Category = "Application"
         Prompt = "Install Scoop and your Nix project?"
+        Detail = "Installs the Scoop package manager, adds the sadirano bucket, and installs nix (directory aliases: o/e/r/sg...). Pulls bat, fzf, ripgrep, fd, Neovim, and clink along as dependencies."
         Action = {
             Write-Host "Checking for Scoop..." -ForegroundColor Cyan
             if (!(Get-Command scoop -ErrorAction SilentlyContinue)) {
@@ -441,6 +485,7 @@ public class Wallpaper {
         Name = "clink"
         Category = "Application"
         Prompt = "Install clink (cmd autosuggestions) and hook the core doskey macros into it?"
+        Detail = "clink gives cmd fish-style autosuggestions and sane line editing; this wires it into every cmd session and autoloads the core macros through it. Skip if you never live in cmd."
         Action = {
             $scoopCmd = Get-ScoopCmd
             & $scoopCmd install clink
@@ -460,6 +505,7 @@ public class Wallpaper {
         Name = "neovim"
         Category = "Application"
         Prompt = "Install Neovim?"
+        Detail = "Standalone Neovim via Scoop. Redundant if you take the scoop-nix step - nix already brings Neovim as a dependency."
         Action = {
             $scoopCmd = Get-ScoopCmd
             & $scoopCmd install neovim
@@ -469,6 +515,7 @@ public class Wallpaper {
         Name = "bat"
         Category = "Application"
         Prompt = "Install bat (cat with syntax highlighting)?"
+        Detail = "Nicer file previews in the terminal. Redundant if you take the scoop-nix step - it arrives as a nix dependency."
         Action = {
             $scoopCmd = Get-ScoopCmd
             & $scoopCmd install bat
@@ -478,6 +525,7 @@ public class Wallpaper {
         Name = "fzf"
         Category = "Application"
         Prompt = "Install fzf (fuzzy finder, used by nix's pickers)?"
+        Detail = "The fuzzy picker behind nix's sg/ff and many shell workflows. Redundant if you take the scoop-nix step - it arrives as a nix dependency."
         Action = {
             $scoopCmd = Get-ScoopCmd
             & $scoopCmd install fzf
@@ -487,6 +535,7 @@ public class Wallpaper {
         Name = "rga"
         Category = "Application"
         Prompt = "Install ripgrep-all (rga - search inside PDFs, office docs, archives; powers nix's 'sg --all')?"
+        Detail = "Optional nix companion: lets 'sg --all' grep inside PDFs, office documents, and archives. Skip if plain-text search covers your needs."
         Action = {
             $scoopCmd = Get-ScoopCmd
             & $scoopCmd install rga
@@ -496,6 +545,7 @@ public class Wallpaper {
         Name = "terminal-fonts"
         Category = "Application"
         Prompt = "Install Windows Terminal and Nerd Fonts?"
+        Detail = "Installs Windows Terminal (if missing) plus the Mononoki Nerd Font - the icons and glyphs the terminal config and Neovim UI expect."
         Action = {
             $scoopCmd = Get-ScoopCmd
 
@@ -518,6 +568,7 @@ public class Wallpaper {
         Name = "nvim-config"
         Category = "Configuration"
         Prompt = "Clone Neovim configuration?"
+        Detail = "Clones the Neovim config repo into place so nvim opens fully set up. Skip on machines where you will not edit in Neovim."
         Action = {
             $nvimDir = "$env:LOCALAPPDATA\nvim"
             $gitCmd = Get-GitCmd
@@ -537,6 +588,7 @@ public class Wallpaper {
         Name = "dotfiles"
         Category = "Configuration"
         Prompt = "Clone Dotfiles?"
+        Detail = "Clones the personal dotfiles repo. Skip on shared or throwaway machines that should not carry your configs."
         Action = {
             $dotfilesDir = "$env:USERPROFILE\dotfiles"
             $gitCmd = Get-GitCmd
@@ -556,6 +608,7 @@ public class Wallpaper {
         Name = "terminal-config"
         Category = "Configuration"
         Prompt = "Configure Windows Terminal preferences?"
+        Detail = "Writes the Windows Terminal settings (font, scheme, default profile, keybindings). Overwrites any preferences you already tuned there."
         Action = {
             Write-Host "Setting Windows Terminal as the Default Terminal Application..." -ForegroundColor Cyan
             $delegationPath = "HKCU:\Console\%%Startup"
@@ -647,6 +700,7 @@ public class Wallpaper {
     @{
         Name = "dev-tools"
         Prompt = "Proceed to Advanced Developer Tools section? [WARNING: Heavy, niche, case-by-case tools]"
+        Detail = "Gate for the heavy developer tools below; answering No skips the whole section."
         Action = {
             Write-Host "Entering Advanced Developer Tools section..." -ForegroundColor Magenta
         }
@@ -656,6 +710,7 @@ public class Wallpaper {
         Name = "nodejs"
         Category = "Application"
         Prompt = "Install Node.js? (Required for Mason LSPs like tsserver, prettier, pyright)"
+        Detail = "Runtime for Neovim's Mason-managed language servers and formatters (tsserver, prettier, pyright) and general JS work. Skip if none of that runs here."
         Action = {
             $scoopCmd = Get-ScoopCmd
             Write-Host "Installing Node.js..." -ForegroundColor Cyan
@@ -666,6 +721,7 @@ public class Wallpaper {
         Name = "python"
         Category = "Application"
         Prompt = "Install Python? (Required for Mason tools like xmlformatter, black)"
+        Detail = "Runtime for Mason tools like black and xmlformatter, plus everyday scripting. Skip if no Python tooling is needed on this machine."
         Action = {
             $scoopCmd = Get-ScoopCmd
             Write-Host "Installing Python..." -ForegroundColor Cyan
@@ -676,6 +732,7 @@ public class Wallpaper {
         Name = "c-build-tools"
         Category = "Application"
         Prompt = "Install C Build Tools (gcc, make, tree-sitter)? [~500MB]"
+        Detail = "Compilers for building tree-sitter grammars and native extensions - roughly 500MB. Skip unless Neovim tree-sitter or C builds matter here."
         Action = {
             $scoopCmd = Get-ScoopCmd
             Write-Host "Installing C compilers..." -ForegroundColor Cyan
@@ -686,6 +743,7 @@ public class Wallpaper {
         Name = "ripgrep-fd"
         Category = "Application"
         Prompt = "Install ripgrep (rg) and fd? (Mandatory for fast Telescope searches)"
+        Detail = "rg and fd power fast Telescope searches in Neovim and are cheap, broadly useful CLI staples (also nix dependencies)."
         Action = {
             $scoopCmd = Get-ScoopCmd
             Write-Host "Installing ripgrep and fd..." -ForegroundColor Cyan
@@ -696,6 +754,7 @@ public class Wallpaper {
         Name = "pwsh-powertoys"
         Category = "Application"
         Prompt = "Install PowerShell 7 and PowerToys (for remapping Caps Lock)?"
+        Detail = "Modern PowerShell plus PowerToys utilities (Keyboard Manager remaps Caps Lock, FancyZones, etc.). Skip if stock shell and keys are fine."
         Action = {
             $scoopCmd = Get-ScoopCmd
             Write-Host "Installing pwsh and PowerToys..." -ForegroundColor Cyan
@@ -707,6 +766,7 @@ public class Wallpaper {
         Name = "git-identity"
         Category = "Configuration"
         Prompt = "Configure Git Global Identity (Name & Email)?"
+        Detail = "Sets git config --global user.name and user.email so commits are attributed correctly. Skips itself if an identity is already configured."
         Action = {
             $gitCmd = Get-GitCmd
             if ($gitCmd -eq "git" -and !(Get-Command git -ErrorAction SilentlyContinue)) {
@@ -745,6 +805,7 @@ public class Wallpaper {
         Name = "remove-onedrive"
         Category = "Application"
         Prompt = "Uninstall Microsoft OneDrive? [WARNING: Permanently removes OneDrive]"
+        Detail = "Removes OneDrive and its autostart hooks. Local files stay, but sync stops - skip if anything on this machine lives in OneDrive."
         Action = {
             if (-not $Yolo) {
                 $confirm = Read-Host "Are you absolutely sure you want to uninstall OneDrive? Type 'yes' to confirm"
@@ -790,6 +851,7 @@ public class Wallpaper {
         Name = "windhawk"
         Category = "Application"
         Prompt = "Install Windhawk? (Used for advanced Windows UI mods like 'Taskbar on top')"
+        Detail = "Mod platform for Windows UI tweaks like moving the taskbar to the top. Niche - skip unless you want to customize the shell beyond stock options."
         Action = {
             Write-Host "Installing Windhawk via Winget..." -ForegroundColor Cyan
             & winget install RamenSoftware.Windhawk --accept-package-agreements --accept-source-agreements --silent
@@ -894,7 +956,7 @@ if (-not $quitRequested) {
             # Save current step to state file in case they forcefully exit (Ctrl+C) or press Q
             Set-Content -Path $stateFile -Value $step.Name
 
-            $choice = Confirm-Action -StepName $step.Name -Prompt "$($i + 1). [$($step.Name)] $($step.Prompt)"
+            $choice = Confirm-Action -StepName $step.Name -Prompt "$($i + 1). [$($step.Name)] $($step.Prompt)" -Detail $step.Detail
 
             if ($choice -eq "Quit") {
                 Write-Host "Quitting script. Progress saved at step '$($step.Name)'. Run the script again to resume." -ForegroundColor Magenta
