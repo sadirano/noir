@@ -645,10 +645,27 @@ public class Wallpaper {
         Detail = "Writes the Windows Terminal settings (font, scheme, default profile, keybindings). Overwrites any preferences you already tuned there."
         Action = {
             Write-Host "Setting Windows Terminal as the Default Terminal Application..." -ForegroundColor Cyan
-            $delegationPath = "HKCU:\Console\%%Startup"
-            if (!(Test-Path $delegationPath)) { New-Item -Path $delegationPath -Force | Out-Null }
-            Set-ItemProperty -Path $delegationPath -Name "DelegationConsole" -Value "{2EACA947-7F5F-4CFA-BA87-8F7FBEEFBE69}" -Type String
-            Set-ItemProperty -Path $delegationPath -Name "DelegationTerminal" -Value "{E12CFF52-A866-4C77-9A90-F570A7AA2C6B}" -Type String
+            $delegationConsole = "{2EACA947-7F5F-4CFA-BA87-8F7FBEEFBE69}"
+            $delegationTerminal = "{E12CFF52-A866-4C77-9A90-F570A7AA2C6B}"
+
+            # A wrong or unregistered GUID doesn't error - Windows just silently
+            # falls back to another terminal - so refuse to write the pair unless
+            # both resolve to a registered COM class (packaged or unpackaged).
+            $guidRegistered = {
+                param($guid)
+                (Test-Path "HKLM:\SOFTWARE\Classes\PackagedCom\ClassIndex\$guid") -or
+                (Test-Path "HKLM:\SOFTWARE\Classes\CLSID\$guid") -or
+                (Test-Path "HKCU:\Software\Classes\CLSID\$guid")
+            }
+            if ((& $guidRegistered $delegationConsole) -and (& $guidRegistered $delegationTerminal)) {
+                $delegationPath = "HKCU:\Console\%%Startup"
+                if (!(Test-Path $delegationPath)) { New-Item -Path $delegationPath -Force | Out-Null }
+                Set-ItemProperty -Path $delegationPath -Name "DelegationConsole" -Value $delegationConsole -Type String
+                Set-ItemProperty -Path $delegationPath -Name "DelegationTerminal" -Value $delegationTerminal -Type String
+                Write-Host "Default terminal set to Windows Terminal." -ForegroundColor Green
+            } else {
+                Write-Host "WARNING: Windows Terminal's delegation classes are not registered on this machine (is it installed?). Leaving the default terminal unchanged." -ForegroundColor Yellow
+            }
 
             $wtSettingsPaths = @(
                 "$env:LOCALAPPDATA\Packages\Microsoft.WindowsTerminal_8wekyb3d8bbwe\LocalState\settings.json",
