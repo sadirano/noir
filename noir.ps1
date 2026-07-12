@@ -128,31 +128,52 @@ function Show-StepMenu {
     $pos = 0
 
     try {
-        if ([Console]::WindowHeight -lt 15) { return $null }
-        if ([Console]::WindowWidth -lt 60) { return $null }
+        # Prefer the PowerShell host's measurement: in pseudo-console hosts the
+        # raw Console API under-reports the window (or has no handle at all)
+        # while $Host.UI.RawUI reports the real size.
+        $measure = {
+            $s = $Host.UI.RawUI.WindowSize
+            if ($s -and $s.Height -gt 4 -and $s.Width -gt 4) { return $s }
+            return New-Object System.Management.Automation.Host.Size([Console]::WindowWidth, [Console]::WindowHeight)
+        }
+        $printHeader = {
+            Write-Host "Up/Down (or K/J): move | Space: toggle | A: toggle all | Enter: run selected | Q/Esc: quit" -ForegroundColor Cyan
+            Write-Host -NoNewline "Categories: "
+            Write-Host -NoNewline "Visual" -ForegroundColor Magenta
+            Write-Host -NoNewline " / "
+            Write-Host -NoNewline "Application/Programs" -ForegroundColor Yellow
+            Write-Host -NoNewline " / "
+            Write-Host "Configuration" -ForegroundColor Cyan
+        }
+
+        $size = & $measure
+        if ($size.Height -lt 15) { return $null }
+        if ($size.Width -lt 60) { return $null }
         try { [Console]::CursorVisible = $false } catch {}
 
-        Write-Host "Up/Down (or K/J): move | Space: toggle | A: toggle all | Enter: run selected | Q/Esc: quit" -ForegroundColor Cyan
-        Write-Host -NoNewline "Categories: "
-        Write-Host -NoNewline "Visual" -ForegroundColor Magenta
-        Write-Host -NoNewline " / "
-        Write-Host -NoNewline "Application/Programs" -ForegroundColor Yellow
-        Write-Host -NoNewline " / "
-        Write-Host "Configuration" -ForegroundColor Cyan
-        # Scroll the list inside a viewport when it is taller than the window.
-        # Row budget: 2 header + 2 detail + 1 status + 1 cursor row; scrolling adds
-        # the two "... more ..." indicator lines.
-        $scrolling = $items.Count -gt ([Console]::WindowHeight - 6)
-        $viewRows = if ($scrolling) { [Math]::Max(3, [Console]::WindowHeight - 8) } else { $items.Count }
-        $redrawLines = $viewRows + 3 + $(if ($scrolling) { 2 } else { 0 })
+        & $printHeader
         $top = 0
         $drawn = $false
         while ($true) {
+            # The list claims every row the host reports, minus fixed chrome:
+            # 2 header + 2 detail + 1 status + 1 cursor row; scrolling adds the
+            # two "... more ..." indicator lines. Re-measured each pass so
+            # resizing the window mid-menu grows the list to fill it.
+            $newSize = & $measure
+            if ($drawn -and ($newSize.Height -ne $size.Height -or $newSize.Width -ne $size.Width)) {
+                Clear-Host
+                & $printHeader
+                $drawn = $false
+            }
+            $size = $newSize
+            $scrolling = $items.Count -gt ($size.Height - 6)
+            $viewRows = if ($scrolling) { [Math]::Max(3, $size.Height - 8) } else { $items.Count }
+            $redrawLines = $viewRows + 3 + $(if ($scrolling) { 2 } else { 0 })
             if ($drawn) { [Console]::SetCursorPosition(0, [Console]::CursorTop - $redrawLines) }
             $cursorIdx = $selectable[$pos]
             if ($cursorIdx -lt $top) { $top = $cursorIdx }
             if ($cursorIdx -ge $top + $viewRows) { $top = $cursorIdx - $viewRows + 1 }
-            $width = [Console]::WindowWidth - 1
+            $width = $size.Width - 1
             $labelWidth = $width - 26
             if ($scrolling) {
                 $aboveText = if ($top -gt 0) { "    ... $top more above ..." } else { "" }
