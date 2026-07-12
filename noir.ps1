@@ -1,0 +1,936 @@
+﻿<#
+.SYNOPSIS
+Automated Windows Setup and Customization Script.
+
+.DESCRIPTION
+This script configures a Windows 11 machine for development and aesthetics.
+By default it shows an interactive checklist where you pick the steps to run
+(Up/Down or J/K to move, Space to toggle, A to toggle all, Enter to run, Q to quit).
+It can be fully automated using Profiles or -Yolo, which skip the checklist.
+
+.PARAMETER SetupProfile
+Applies a predefined template of answers. (Aliases: -Profile, -p)
+Available Profiles:
+- sadirano: The YOLO mode. Auto-accepts absolutely everything.
+- nix: Sets up Scoop, Nix, and Neovim but ignores UI tweaks and heavy compilers.
+- dev: Sets up full Neovim, Compilers, Node, and Python, but skips UI tweaks.
+- minimal: Installs basic Terminal and Scoop. No Neovim or Compilers.
+- aesthetic: Applies UI tweaks and Terminal themes only.
+
+.PARAMETER Yolo
+Bypass all prompts and answer Yes to everything.
+
+.PARAMETER StartStep
+Start the script at a specific step, by name (e.g. 'terminal-config') or 1-based number.
+
+.PARAMETER GitName
+Git user.name for the git-identity step (avoids the interactive prompt in automated runs).
+
+.PARAMETER GitEmail
+Git user.email for the git-identity step (avoids the interactive prompt in automated runs).
+
+.EXAMPLE
+.\noir.ps1 -Profile dev
+
+.EXAMPLE
+.\noir.ps1 -StartStep terminal-config
+#>
+# Requires to be run as the user
+param (
+    [Alias("step")]
+    [string]$StartStep = "",
+    [Alias("y")]
+    [switch]$Yolo,
+    [Alias("p", "Profile")]
+    [ValidateSet("", "sadirano", "nix", "dev", "minimal", "aesthetic")]
+    [string]$SetupProfile = "",
+    [string]$GitName = "",
+    [string]$GitEmail = ""
+)
+
+$SetupProfileKey = $SetupProfile.ToLower()
+if ($SetupProfileKey -eq "sadirano") { $Yolo = $true }
+
+$ProfileConfigs = @{
+    "nix" = @{
+        "dark-mode"="No"; "hide-desktop-icons"="No"; "remove-search-bar"="No"; "clear-taskbar"="No"
+        "taskbar-autohide"="No"; "black-wallpaper"="No"; "nags-and-ads"="No"; "noir-path"="Yes"; "core-macros"="Yes"
+        "scoop-nix"="Yes"; "clink"="Yes"; "neovim"="No"; "bat"="No"; "fzf"="No"; "rga"="Yes"
+        "terminal-fonts"="Yes"; "nvim-config"="Yes"; "dotfiles"="No"
+        "terminal-config"="Yes"; "dev-tools"="No"
+        "restart-explorer"="No"
+    }
+    "minimal" = @{
+        "dark-mode"="No"; "hide-desktop-icons"="No"; "remove-search-bar"="No"; "clear-taskbar"="No"
+        "taskbar-autohide"="No"; "black-wallpaper"="No"; "nags-and-ads"="Yes"; "noir-path"="Yes"; "core-macros"="Yes"
+        "scoop-nix"="Yes"; "clink"="Yes"; "neovim"="No"; "bat"="No"; "fzf"="No"; "rga"="No"
+        "terminal-fonts"="Yes"; "nvim-config"="No"; "dotfiles"="No"
+        "terminal-config"="No"; "dev-tools"="Yes"
+        "nodejs"="No"; "python"="No"; "c-build-tools"="No"; "ripgrep-fd"="No"
+        "pwsh-powertoys"="Yes"; "git-identity"="No"; "remove-onedrive"="No"; "windhawk"="No"
+        "restart-explorer"="No"
+    }
+    "dev" = @{
+        "dark-mode"="No"; "hide-desktop-icons"="No"; "remove-search-bar"="No"; "clear-taskbar"="No"
+        "taskbar-autohide"="No"; "black-wallpaper"="No"; "nags-and-ads"="Yes"; "noir-path"="Yes"; "core-macros"="Yes"
+        "scoop-nix"="Yes"; "clink"="Yes"; "neovim"="No"; "bat"="No"; "fzf"="No"; "rga"="Yes"
+        "terminal-fonts"="Yes"; "nvim-config"="Yes"; "dotfiles"="No"
+        "terminal-config"="Yes"; "dev-tools"="Yes"
+        "nodejs"="Yes"; "python"="Yes"; "c-build-tools"="Yes"; "ripgrep-fd"="Yes"
+        "pwsh-powertoys"="Yes"; "git-identity"="Yes"; "remove-onedrive"="No"; "windhawk"="No"
+        "restart-explorer"="No"
+    }
+    "aesthetic" = @{
+        "dark-mode"="Yes"; "hide-desktop-icons"="Yes"; "remove-search-bar"="Yes"; "clear-taskbar"="Yes"
+        "taskbar-autohide"="Yes"; "black-wallpaper"="Yes"; "nags-and-ads"="No"; "noir-path"="No"; "core-macros"="No"
+        "scoop-nix"="No"; "clink"="No"; "neovim"="No"; "bat"="No"; "fzf"="No"; "rga"="No"
+        "terminal-fonts"="Yes"; "nvim-config"="No"; "dotfiles"="No"
+        "terminal-config"="Yes"; "dev-tools"="No"
+        "restart-explorer"="Yes"
+    }
+}
+
+$stateFile = "$env:TEMP\NoirSetupState.txt"
+
+$CategoryColors = @{ "Visual" = "Magenta"; "Application" = "Yellow"; "Configuration" = "Cyan" }
+
+function Get-ScoopCmd {
+    # If scoop was just installed, PATH for the current session isn't updated yet,
+    # so fall back to the shim path explicitly.
+    if (Test-Path "$env:USERPROFILE\scoop\shims\scoop.ps1") {
+        return "$env:USERPROFILE\scoop\shims\scoop.ps1"
+    }
+    return "scoop"
+}
+
+function Get-GitCmd {
+    if (Test-Path "$env:USERPROFILE\scoop\shims\git.exe") {
+        return "$env:USERPROFILE\scoop\shims\git.exe"
+    }
+    return "git"
+}
+
+function Show-StepMenu {
+    # Arrow-key checkbox picker. Returns @{ Action = "Run"; Names = [string[]] } or
+    # @{ Action = "Quit" }; returns $null when the console can't host an interactive
+    # menu (tiny window, redirected input) so the caller falls back to per-step prompts.
+    param([array]$Steps, [string[]]$CheckedNames)
+
+    $items = @()
+    foreach ($step in $Steps) {
+        if ($step.IsGatekeeper) {
+            $items += @{ Header = $true; Label = "--- Advanced Developer Tools (heavy, case-by-case) ---" }
+        } else {
+            $items += @{ Header = $false; Name = $step.Name; Label = $step.Prompt; Category = $step.Category; Checked = ($CheckedNames -contains $step.Name) }
+        }
+    }
+    $selectable = @(0..($items.Count - 1) | Where-Object { -not $items[$_].Header })
+    $pos = 0
+
+    try {
+        if ([Console]::WindowHeight -lt ($items.Count + 5)) { return $null }
+        if ([Console]::WindowWidth -lt 60) { return $null }
+        try { [Console]::CursorVisible = $false } catch {}
+
+        Write-Host "Up/Down (or K/J): move | Space: toggle | A: toggle all | Enter: run selected | Q/Esc: quit" -ForegroundColor Cyan
+        Write-Host -NoNewline "Categories: "
+        Write-Host -NoNewline "Visual" -ForegroundColor Magenta
+        Write-Host -NoNewline " / "
+        Write-Host -NoNewline "Application/Programs" -ForegroundColor Yellow
+        Write-Host -NoNewline " / "
+        Write-Host "Configuration" -ForegroundColor Cyan
+        $drawn = $false
+        while ($true) {
+            if ($drawn) { [Console]::SetCursorPosition(0, [Console]::CursorTop - $items.Count) }
+            $width = [Console]::WindowWidth - 1
+            $labelWidth = $width - 26
+            for ($i = 0; $i -lt $items.Count; $i++) {
+                $item = $items[$i]
+                if ($item.Header) {
+                    Write-Host ("      $($item.Label)".PadRight($width).Substring(0, $width)) -ForegroundColor DarkGray
+                    continue
+                }
+                $isCursor = ($i -eq $selectable[$pos])
+                $pointer = if ($isCursor) { ">" } else { " " }
+                $mark = if ($item.Checked) { "[x]" } else { "[ ]" }
+                $stateColor = if ($isCursor) { "Green" } elseif ($item.Checked) { "White" } else { "DarkGray" }
+                $nameColor = $CategoryColors[$item.Category]
+                if (-not $item.Checked -and -not $isCursor) { $nameColor = "Dark$nameColor" }
+                Write-Host -NoNewline " $pointer $mark " -ForegroundColor $stateColor
+                Write-Host -NoNewline $item.Name.PadRight(19).Substring(0, 19) -ForegroundColor $nameColor
+                Write-Host ((" " + $item.Label).PadRight($labelWidth).Substring(0, $labelWidth)) -ForegroundColor $stateColor
+            }
+            $drawn = $true
+
+            $key = [Console]::ReadKey($true).Key
+            if ($key -eq 'UpArrow' -or $key -eq 'K') {
+                $pos = ($pos - 1 + $selectable.Count) % $selectable.Count
+            } elseif ($key -eq 'DownArrow' -or $key -eq 'J') {
+                $pos = ($pos + 1) % $selectable.Count
+            } elseif ($key -eq 'Spacebar') {
+                $items[$selectable[$pos]].Checked = -not $items[$selectable[$pos]].Checked
+            } elseif ($key -eq 'A') {
+                $allChecked = @($items | Where-Object { -not $_.Header -and -not $_.Checked }).Count -eq 0
+                foreach ($item in $items) {
+                    if (-not $item.Header) { $item.Checked = -not $allChecked }
+                }
+            } elseif ($key -eq 'Enter') {
+                return @{ Action = "Run"; Names = @($items | Where-Object { -not $_.Header -and $_.Checked } | ForEach-Object { $_.Name }) }
+            } elseif ($key -eq 'Q' -or $key -eq 'Escape') {
+                return @{ Action = "Quit" }
+            }
+        }
+    } catch {
+        return $null
+    } finally {
+        try { [Console]::CursorVisible = $true } catch {}
+    }
+}
+
+function Confirm-Action {
+    param([string]$StepName = "", [string]$Prompt)
+
+    if ($Yolo) {
+        Write-Host "$Prompt [Auto-Confirmed: Yes]" -ForegroundColor DarkGreen
+        return "Yes"
+    }
+
+    if ($StepName -and $ProfileConfigs.ContainsKey($SetupProfileKey)) {
+        $preset = $ProfileConfigs[$SetupProfileKey][$StepName]
+        if ($null -ne $preset) {
+            if ($preset -eq "Yes") {
+                Write-Host "$Prompt [Profile '$SetupProfile': Yes]" -ForegroundColor DarkGreen
+                return "Yes"
+            } elseif ($preset -eq "No") {
+                Write-Host "$Prompt [Profile '$SetupProfile': Skipped]" -ForegroundColor DarkGray
+                return "No"
+            }
+        }
+    }
+
+    Write-Host -NoNewline "$Prompt "
+
+    try {
+        while ($true) {
+            $keyInfo = [System.Console]::ReadKey($true)
+            if ($keyInfo.Key -eq 'Enter' -or $keyInfo.Key -eq 'Y') {
+                Write-Host "Yes" -ForegroundColor Green
+                return "Yes"
+            } elseif ($keyInfo.Key -eq 'Escape' -or $keyInfo.Key -eq 'N') {
+                Write-Host "Skipped" -ForegroundColor Yellow
+                return "No"
+            } elseif ($keyInfo.Key -eq 'Q') {
+                Write-Host "Quit" -ForegroundColor Red
+                return "Quit"
+            }
+        }
+    } catch {
+        $response = Read-Host
+        if ($response -match "^[Nn]") { return "No" }
+        if ($response -match "^[Qq]") { return "Quit" }
+        return "Yes"
+    }
+}
+
+$steps = @(
+    @{
+        Name = "dark-mode"
+        Category = "Visual"
+        Prompt = "Enable Dark Mode?"
+        Action = {
+            Write-Host "Applying Dark Mode..." -ForegroundColor Cyan
+            Set-ItemProperty -Path "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Themes\Personalize" -Name "AppsUseLightTheme" -Value 0 -Type DWord
+            Set-ItemProperty -Path "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Themes\Personalize" -Name "SystemUsesLightTheme" -Value 0 -Type DWord
+        }
+    },
+    @{
+        Name = "hide-desktop-icons"
+        Category = "Visual"
+        Prompt = "Hide Desktop Icons?"
+        Action = {
+            Write-Host "Hiding Desktop Icons..." -ForegroundColor Cyan
+            Set-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced" -Name "HideIcons" -Value 1 -Type DWord
+        }
+    },
+    @{
+        Name = "remove-search-bar"
+        Category = "Visual"
+        Prompt = "Remove Search Bar from Taskbar?"
+        Action = {
+            Write-Host "Removing Search Bar..." -ForegroundColor Cyan
+            Set-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Search" -Name "SearchboxTaskbarMode" -Value 0 -Type DWord
+        }
+    },
+    @{
+        Name = "clear-taskbar"
+        Category = "Visual"
+        Prompt = "Remove all shortcuts from the taskbar?"
+        Action = {
+            Write-Host "Removing Taskbar Pinned Items..." -ForegroundColor Cyan
+            $taskbandPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Taskband"
+            if (Test-Path $taskbandPath) {
+                Remove-Item -Path $taskbandPath -Recurse -Force
+            }
+        }
+    },
+    @{
+        Name = "taskbar-autohide"
+        Category = "Visual"
+        Prompt = "Enable Auto-Hide for Taskbar?"
+        Action = {
+            Write-Host "Enabling Taskbar Auto-hide..." -ForegroundColor Cyan
+            $stuckRects3Path = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\StuckRects3"
+            if (Test-Path $stuckRects3Path) {
+                $settings = Get-ItemProperty -Path $stuckRects3Path -Name "Settings"
+                $bytes = $settings.Settings
+                if ($bytes.Length -gt 8 -and $bytes[8] -ne 3) {
+                    $bytes[8] = 3
+                    Set-ItemProperty -Path $stuckRects3Path -Name "Settings" -Value $bytes
+                }
+            }
+        }
+    },
+    @{
+        Name = "black-wallpaper"
+        Category = "Visual"
+        Prompt = "Change Wallpaper to Solid Black?"
+        Action = {
+            Write-Host "Setting Wallpaper to Solid Black..." -ForegroundColor Cyan
+            Set-ItemProperty -Path "HKCU:\Control Panel\Desktop" -Name "WallPaper" -Value ""
+            Set-ItemProperty -Path "HKCU:\Control Panel\Colors" -Name "Background" -Value "0 0 0"
+
+            $code = @"
+using System;
+using System.Runtime.InteropServices;
+public class Wallpaper {
+    [DllImport("user32.dll", CharSet = CharSet.Auto)]
+    public static extern int SystemParametersInfo(int uAction, int uParam, string lpvParam, int fuWinIni);
+}
+"@
+            Add-Type -TypeDefinition $code -ErrorAction SilentlyContinue
+            [Wallpaper]::SystemParametersInfo(0x0014, 0, "", 0x01 -bOR 0x02) | Out-Null
+        }
+    },
+    @{
+        Name = "nags-and-ads"
+        Category = "Configuration"
+        Prompt = "Disable 'finish setting up' nag screens and ad personalization?"
+        Action = {
+            Write-Host "Disabling setup nag screens and ad personalization..." -ForegroundColor Cyan
+            # Disable 'Let's finish setting up your device'
+            Set-ItemProperty -Path "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\UserProfileEngagement" -Name "ScoobeSystemSettingEnabled" -Value 0 -Type DWord -Force -ErrorAction SilentlyContinue
+            # Disable Windows Welcome Experience
+            Set-ItemProperty -Path "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\ContentDeliveryManager" -Name "SubscribedContent-310093Enabled" -Value 0 -Type DWord -Force -ErrorAction SilentlyContinue
+            # Disable Tailored Experiences (Diagnostic Data)
+            Set-ItemProperty -Path "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Privacy" -Name "TailoredExperiencesWithDiagnosticDataEnabled" -Value 0 -Type DWord -Force -ErrorAction SilentlyContinue
+            # Disable Advertising ID
+            Set-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\AdvertisingInfo" -Name "Enabled" -Value 0 -Type DWord -Force -ErrorAction SilentlyContinue
+
+            Write-Host "Disabled successfully!" -ForegroundColor Green
+        }
+    },
+    @{
+        Name = "noir-path"
+        Category = "Configuration"
+        Prompt = "Add Noir's 'core' commands and 'user' scripts folders to your PATH?"
+        Action = {
+            $noirDir = $PSScriptRoot
+            $coreDir = Join-Path $noirDir "core"
+            $userDir = Join-Path $noirDir "user"
+            if (!(Test-Path $userDir)) {
+                Write-Host "Creating user scripts folder at $userDir..." -ForegroundColor Cyan
+                New-Item -ItemType Directory -Path $userDir | Out-Null
+            }
+
+            $currentPath = [Environment]::GetEnvironmentVariable("Path", "User")
+            $parts = @($currentPath -split ";" | Where-Object { $_ })
+            $normalized = @($parts | ForEach-Object { $_.TrimEnd("\") })
+            $added = @()
+            foreach ($dir in @($coreDir, $userDir)) {
+                if ($normalized -notcontains $dir.TrimEnd("\")) {
+                    $parts += $dir
+                    $added += $dir
+                }
+            }
+            if ($added) {
+                [Environment]::SetEnvironmentVariable("Path", ($parts -join ";"), "User")
+                Write-Host "Added to user PATH: $($added -join '; ')" -ForegroundColor Green
+                Write-Host "Open a new terminal for the PATH change to take effect." -ForegroundColor Yellow
+            } else {
+                Write-Host "Noir folders are already on PATH." -ForegroundColor Green
+            }
+        }
+    },
+    @{
+        Name = "core-macros"
+        Category = "Configuration"
+        Prompt = "Register Noir core macros (doskey cc/q for cmd, q/cc functions for PowerShell)?"
+        Action = {
+            $coreDir = Join-Path $PSScriptRoot "core"
+
+            # cmd: doskey macros via AutoRun
+            $key = "HKCU:\Software\Microsoft\Command Processor"
+            $macFile = Join-Path $coreDir "doskey.mac"
+            $macroCmd = "doskey /macrofile=`"$macFile`""
+            $autoRun = (Get-ItemProperty -Path $key -Name AutoRun -ErrorAction SilentlyContinue).AutoRun
+            if ($autoRun -match 'doskey\.mac') {
+                Write-Host "cmd AutoRun already loads doskey.mac - skipping." -ForegroundColor Green
+            } else {
+                if (!(Test-Path $key)) { New-Item -Path $key -Force | Out-Null }
+                # Append rather than overwrite: other tools (e.g. clink) hook AutoRun too.
+                $new = if ($autoRun) { "$autoRun & $macroCmd" } else { $macroCmd }
+                Set-ItemProperty -Path $key -Name AutoRun -Value $new
+                Write-Host "Registered doskey macros in cmd AutoRun." -ForegroundColor Green
+            }
+
+            # PowerShell: dot-source core.ps1 from the user profile(s)
+            $marker = "# noir-core"
+            $corePs1 = Join-Path $coreDir "core.ps1"
+            $line = ". `"$corePs1`"  $marker"
+            $docs = [Environment]::GetFolderPath("MyDocuments")
+            $profileDirs = @(Join-Path $docs "WindowsPowerShell")
+            if (Get-Command pwsh -ErrorAction SilentlyContinue) {
+                $profileDirs += Join-Path $docs "PowerShell"
+            }
+            foreach ($dir in $profileDirs) {
+                $profilePath = Join-Path $dir "profile.ps1"
+                if ((Test-Path $profilePath) -and (Select-String -Path $profilePath -SimpleMatch $marker -Quiet)) {
+                    Write-Host "PowerShell profile already loads core.ps1 - skipping ($profilePath)." -ForegroundColor Green
+                    continue
+                }
+                New-Item -ItemType Directory -Force -Path $dir | Out-Null
+                Add-Content -Path $profilePath -Value $line
+                Write-Host "Registered core.ps1 in $profilePath." -ForegroundColor Green
+            }
+            Write-Host "Open a new cmd or PowerShell window to pick up the macros." -ForegroundColor Yellow
+        }
+    },
+    @{
+        Name = "scoop-nix"
+        Category = "Application"
+        Prompt = "Install Scoop and your Nix project?"
+        Action = {
+            Write-Host "Checking for Scoop..." -ForegroundColor Cyan
+            if (!(Get-Command scoop -ErrorAction SilentlyContinue)) {
+                Write-Host "Setting execution policy to RemoteSigned for CurrentUser (required by the Scoop installer)..." -ForegroundColor Yellow
+                Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser -Force
+                Write-Host "Installing Scoop..." -ForegroundColor Cyan
+                Invoke-RestMethod -Uri https://get.scoop.sh | Invoke-Expression
+            } else {
+                Write-Host "Scoop is already installed." -ForegroundColor Green
+            }
+
+            $scoopCmd = Get-ScoopCmd
+
+            # Scoop requires Git to add custom buckets.
+            if (!(Get-Command git -ErrorAction SilentlyContinue) -and !(Test-Path "$env:USERPROFILE\scoop\apps\git")) {
+                Write-Host "Git is required for custom buckets. Installing Git via Scoop..." -ForegroundColor Cyan
+                & $scoopCmd install git
+            }
+
+            Write-Host "Adding 'sadirano' bucket..." -ForegroundColor Cyan
+            & $scoopCmd bucket add sadirano https://github.com/sadirano/bucket
+
+            Write-Host "Installing 'nix' from sadirano bucket..." -ForegroundColor Cyan
+            & $scoopCmd install nix
+
+            # Note: C compilers were moved to an optional step to save time if not needed
+        }
+    },
+    @{
+        Name = "clink"
+        Category = "Application"
+        Prompt = "Install clink (cmd autosuggestions) and hook the core doskey macros into it?"
+        Action = {
+            $scoopCmd = Get-ScoopCmd
+            & $scoopCmd install clink
+
+            $clinkCmd = "$env:USERPROFILE\scoop\shims\clink.cmd"
+            if (!(Test-Path $clinkCmd)) { $clinkCmd = "clink" }
+
+            $macFile = Join-Path $PSScriptRoot "core\doskey.mac"
+            & $clinkCmd autorun install | Out-Null
+            & $clinkCmd set clink.autostart "$env:SystemRoot\System32\doskey.exe /macrofile=$macFile" | Out-Null
+            & $clinkCmd set clink.logo none | Out-Null
+            & $clinkCmd set autosuggest.inline true | Out-Null
+            Write-Host "clink installed; autorun and core macros configured." -ForegroundColor Green
+        }
+    },
+    @{
+        Name = "neovim"
+        Category = "Application"
+        Prompt = "Install Neovim?"
+        Action = {
+            $scoopCmd = Get-ScoopCmd
+            & $scoopCmd install neovim
+        }
+    },
+    @{
+        Name = "bat"
+        Category = "Application"
+        Prompt = "Install bat (cat with syntax highlighting)?"
+        Action = {
+            $scoopCmd = Get-ScoopCmd
+            & $scoopCmd install bat
+        }
+    },
+    @{
+        Name = "fzf"
+        Category = "Application"
+        Prompt = "Install fzf (fuzzy finder, used by nix's pickers)?"
+        Action = {
+            $scoopCmd = Get-ScoopCmd
+            & $scoopCmd install fzf
+        }
+    },
+    @{
+        Name = "rga"
+        Category = "Application"
+        Prompt = "Install ripgrep-all (rga - search inside PDFs, office docs, archives; powers nix's 'sg --all')?"
+        Action = {
+            $scoopCmd = Get-ScoopCmd
+            & $scoopCmd install rga
+        }
+    },
+    @{
+        Name = "terminal-fonts"
+        Category = "Application"
+        Prompt = "Install Windows Terminal and Nerd Fonts?"
+        Action = {
+            $scoopCmd = Get-ScoopCmd
+
+            Write-Host "Adding 'nerd-fonts' and 'extras' buckets..." -ForegroundColor Cyan
+            & $scoopCmd bucket add nerd-fonts
+            & $scoopCmd bucket add extras
+
+            Write-Host "Installing Mononoki Nerd Font..." -ForegroundColor Cyan
+            & $scoopCmd install nerd-fonts/Mononoki-NF-Mono
+
+            if (Get-Command wt -ErrorAction SilentlyContinue) {
+                Write-Host "Windows Terminal is already installed on this system. Skipping Scoop installation." -ForegroundColor Yellow
+            } else {
+                Write-Host "Installing Windows Terminal..." -ForegroundColor Cyan
+                & $scoopCmd install extras/windows-terminal
+            }
+        }
+    },
+    @{
+        Name = "nvim-config"
+        Category = "Configuration"
+        Prompt = "Clone Neovim configuration?"
+        Action = {
+            $nvimDir = "$env:LOCALAPPDATA\nvim"
+            $gitCmd = Get-GitCmd
+
+            if (Test-Path $nvimDir) {
+                Write-Host "Neovim config directory already exists. Pulling latest changes..." -ForegroundColor Yellow
+                Push-Location $nvimDir
+                & $gitCmd pull
+                Pop-Location
+            } else {
+                Write-Host "Cloning sadirano/nvim..." -ForegroundColor Cyan
+                & $gitCmd clone https://github.com/sadirano/nvim $nvimDir
+            }
+        }
+    },
+    @{
+        Name = "dotfiles"
+        Category = "Configuration"
+        Prompt = "Clone Dotfiles?"
+        Action = {
+            $dotfilesDir = "$env:USERPROFILE\dotfiles"
+            $gitCmd = Get-GitCmd
+
+            if (Test-Path $dotfilesDir) {
+                Write-Host "Dotfiles directory already exists. Pulling latest changes..." -ForegroundColor Yellow
+                Push-Location $dotfilesDir
+                & $gitCmd pull
+                Pop-Location
+            } else {
+                Write-Host "Cloning sadirano/dotfiles..." -ForegroundColor Cyan
+                & $gitCmd clone https://github.com/sadirano/dotfiles $dotfilesDir
+            }
+        }
+    },
+    @{
+        Name = "terminal-config"
+        Category = "Configuration"
+        Prompt = "Configure Windows Terminal preferences?"
+        Action = {
+            Write-Host "Setting Windows Terminal as the Default Terminal Application..." -ForegroundColor Cyan
+            $delegationPath = "HKCU:\Console\%%Startup"
+            if (!(Test-Path $delegationPath)) { New-Item -Path $delegationPath -Force | Out-Null }
+            Set-ItemProperty -Path $delegationPath -Name "DelegationConsole" -Value "{2EACA947-7F5F-4CFA-BA87-8F7FBEEF56EA}" -Type String
+            Set-ItemProperty -Path $delegationPath -Name "DelegationTerminal" -Value "{E12CFF52-A866-4C77-9A90-F570A7AA2C6B}" -Type String
+
+            $wtSettingsPaths = @(
+                "$env:LOCALAPPDATA\Packages\Microsoft.WindowsTerminal_8wekyb3d8bbwe\LocalState\settings.json",
+                "$env:LOCALAPPDATA\Microsoft\Windows Terminal\settings.json"
+            )
+            $settingsFile = $wtSettingsPaths | Where-Object { Test-Path $_ } | Select-Object -First 1
+
+            if ($settingsFile) {
+                Write-Host "Backing up settings.json to settings.json.bak..." -ForegroundColor Cyan
+                Copy-Item $settingsFile "$settingsFile.bak" -Force
+
+                Write-Host "Updating Windows Terminal settings.json..." -ForegroundColor Cyan
+                $jsonContent = Get-Content $settingsFile -Raw
+                try {
+                    $settings = $jsonContent | ConvertFrom-Json
+                } catch {
+                    # Windows PowerShell 5.1 can't parse the // comment lines Windows Terminal
+                    # generates in a fresh settings.json; strip them and retry.
+                    $stripped = ($jsonContent -split "`r?`n" | Where-Object { $_ -notmatch '^\s*//' }) -join "`n"
+                    $settings = $stripped | ConvertFrom-Json
+                }
+
+                $settings | Add-Member -MemberType NoteProperty -Name "defaultProfile" -Value "{0caa0dad-35be-5f56-a8ff-afceeeaa6101}" -Force
+                $settings | Add-Member -MemberType NoteProperty -Name "defaultTerminal" -Value "{E12CFF52-A866-4C77-9A90-F570A7AA2C6B}" -Force
+                $settings | Add-Member -MemberType NoteProperty -Name "language" -Value "en-US" -Force
+                $settings | Add-Member -MemberType NoteProperty -Name "launchMode" -Value "maximizedFocus" -Force
+
+                if ($null -eq $settings.profiles) {
+                    $settings | Add-Member -MemberType NoteProperty -Name "profiles" -Value ([PSCustomObject]@{defaults=[PSCustomObject]@{}}) -Force
+                } elseif ($null -eq $settings.profiles.defaults) {
+                    $settings.profiles | Add-Member -MemberType NoteProperty -Name "defaults" -Value ([PSCustomObject]@{}) -Force
+                }
+
+                $settings.profiles.defaults | Add-Member -MemberType NoteProperty -Name "colorScheme" -Value "Tokyo Night" -Force
+                $settings.profiles.defaults | Add-Member -MemberType NoteProperty -Name "opacity" -Value 89 -Force
+
+                $settings.profiles.defaults | Add-Member -MemberType NoteProperty -Name "font" -Value ([PSCustomObject]@{face="Mononoki Nerd Font Mono"; size=16; weight="bold"}) -Force
+
+                $hasTokyoNight = $false
+                if ($null -ne $settings.schemes) {
+                    foreach ($s in $settings.schemes) {
+                        if ($s.name -eq "Tokyo Night") { $hasTokyoNight = $true }
+                    }
+                }
+
+                if (-not $hasTokyoNight) {
+                    $tokyoNightScheme = [PSCustomObject]@{
+                        name = "Tokyo Night"
+                        foreground = "#C0CAF5"
+                        background = "#1A1B26"
+                        selectionBackground = "#283457"
+                        black = "#15161E"
+                        blue = "#7AA2F7"
+                        brightBlack = "#414868"
+                        brightBlue = "#7AA2F7"
+                        brightCyan = "#7DCFFF"
+                        brightGreen = "#9ECE6A"
+                        brightPurple = "#9D7CD8"
+                        brightRed = "#F7768E"
+                        brightWhite = "#C0CAF5"
+                        brightYellow = "#E0AF68"
+                        cursorColor = "#C0CAF5"
+                        cyan = "#7DCFFF"
+                        green = "#9ECE6A"
+                        purple = "#BB9AF7"
+                        red = "#F7768E"
+                        white = "#A9B1D6"
+                        yellow = "#E0AF68"
+                    }
+                    $newSchemes = @()
+                    if ($null -ne $settings.schemes) { $newSchemes += $settings.schemes }
+                    $newSchemes += $tokyoNightScheme
+                    $settings | Add-Member -MemberType NoteProperty -Name "schemes" -Value $newSchemes -Force
+                }
+
+                $settings | ConvertTo-Json -Depth 10 | Set-Content $settingsFile -Encoding utf8
+                Write-Host "Windows Terminal configuration updated successfully!" -ForegroundColor Green
+            } else {
+                Write-Host "Could not find Windows Terminal settings.json. You might need to open Terminal at least once." -ForegroundColor Yellow
+            }
+        }
+    },
+    @{
+        Name = "dev-tools"
+        Prompt = "Proceed to Advanced Developer Tools section? [WARNING: Heavy, niche, case-by-case tools]"
+        Action = {
+            Write-Host "Entering Advanced Developer Tools section..." -ForegroundColor Magenta
+        }
+        IsGatekeeper = $true
+    },
+    @{
+        Name = "nodejs"
+        Category = "Application"
+        Prompt = "Install Node.js? (Required for Mason LSPs like tsserver, prettier, pyright)"
+        Action = {
+            $scoopCmd = Get-ScoopCmd
+            Write-Host "Installing Node.js..." -ForegroundColor Cyan
+            & $scoopCmd install nodejs
+        }
+    },
+    @{
+        Name = "python"
+        Category = "Application"
+        Prompt = "Install Python? (Required for Mason tools like xmlformatter, black)"
+        Action = {
+            $scoopCmd = Get-ScoopCmd
+            Write-Host "Installing Python..." -ForegroundColor Cyan
+            & $scoopCmd install python
+        }
+    },
+    @{
+        Name = "c-build-tools"
+        Category = "Application"
+        Prompt = "Install C Build Tools (gcc, make, tree-sitter)? [~500MB]"
+        Action = {
+            $scoopCmd = Get-ScoopCmd
+            Write-Host "Installing C compilers..." -ForegroundColor Cyan
+            & $scoopCmd install gcc make tree-sitter
+        }
+    },
+    @{
+        Name = "ripgrep-fd"
+        Category = "Application"
+        Prompt = "Install ripgrep (rg) and fd? (Mandatory for fast Telescope searches)"
+        Action = {
+            $scoopCmd = Get-ScoopCmd
+            Write-Host "Installing ripgrep and fd..." -ForegroundColor Cyan
+            & $scoopCmd install ripgrep fd
+        }
+    },
+    @{
+        Name = "pwsh-powertoys"
+        Category = "Application"
+        Prompt = "Install PowerShell 7 and PowerToys (for remapping Caps Lock)?"
+        Action = {
+            $scoopCmd = Get-ScoopCmd
+            Write-Host "Installing pwsh and PowerToys..." -ForegroundColor Cyan
+            & $scoopCmd bucket add extras
+            & $scoopCmd install pwsh powertoys
+        }
+    },
+    @{
+        Name = "git-identity"
+        Category = "Configuration"
+        Prompt = "Configure Git Global Identity (Name & Email)?"
+        Action = {
+            $gitCmd = Get-GitCmd
+            if ($gitCmd -eq "git" -and !(Get-Command git -ErrorAction SilentlyContinue)) {
+                Write-Host "Git is not installed. Skipping git identity." -ForegroundColor Yellow
+                return
+            }
+
+            $existingName = & $gitCmd config --global user.name 2>$null
+            $existingEmail = & $gitCmd config --global user.email 2>$null
+            if ($existingName -and $existingEmail) {
+                Write-Host "Git identity already configured ($existingName <$existingEmail>). Skipping." -ForegroundColor Green
+                return
+            }
+
+            $name = $GitName
+            $email = $GitEmail
+            if (-not $name -or -not $email) {
+                if ($Yolo -or $SetupProfileKey) {
+                    Write-Host "No -GitName/-GitEmail provided; skipping git identity in unattended mode." -ForegroundColor Yellow
+                    return
+                }
+                if (-not $name) { $name = Read-Host "Enter Git User Name (e.g., John Doe)" }
+                if (-not $email) { $email = Read-Host "Enter Git Email (e.g., john@example.com)" }
+            }
+
+            if ($name -and $email) {
+                & $gitCmd config --global user.name $name
+                & $gitCmd config --global user.email $email
+                Write-Host "Git identity configured." -ForegroundColor Green
+            } else {
+                Write-Host "Skipped git config." -ForegroundColor Yellow
+            }
+        }
+    },
+    @{
+        Name = "remove-onedrive"
+        Category = "Application"
+        Prompt = "Uninstall Microsoft OneDrive? [WARNING: Permanently removes OneDrive]"
+        Action = {
+            if (-not $Yolo) {
+                $confirm = Read-Host "Are you absolutely sure you want to uninstall OneDrive? Type 'yes' to confirm"
+                if ($confirm -ne "yes") {
+                    Write-Host "Aborted OneDrive uninstall." -ForegroundColor Yellow
+                    return
+                }
+            }
+
+            Write-Host "Killing OneDrive processes..." -ForegroundColor Cyan
+            Stop-Process -Name "OneDrive" -ErrorAction SilentlyContinue
+            Start-Sleep -Seconds 2
+
+            if (Get-Command winget -ErrorAction SilentlyContinue) {
+                Write-Host "Uninstalling OneDrive via winget..." -ForegroundColor Cyan
+                & winget uninstall Microsoft.OneDrive --accept-source-agreements --silent
+                if ($LASTEXITCODE -eq 0) {
+                    Write-Host "OneDrive uninstalled successfully!" -ForegroundColor Green
+                    return
+                }
+                Write-Host "winget uninstall did not succeed. Falling back to OneDriveSetup.exe..." -ForegroundColor Yellow
+            }
+
+            Write-Host "Executing OneDrive uninstaller..." -ForegroundColor Cyan
+            $candidates = @(
+                "$env:SYSTEMROOT\SysWOW64\OneDriveSetup.exe",
+                "$env:SYSTEMROOT\System32\OneDriveSetup.exe"
+            )
+            # Per-user installs on current Win11 builds keep the installer under LOCALAPPDATA
+            if (Test-Path "$env:LOCALAPPDATA\Microsoft\OneDrive") {
+                $candidates += Get-ChildItem "$env:LOCALAPPDATA\Microsoft\OneDrive" -Filter "OneDriveSetup.exe" -Recurse -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName
+            }
+            $onedriveSetup = $candidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+            if ($onedriveSetup) {
+                & $onedriveSetup /uninstall
+                Write-Host "OneDrive uninstalled successfully!" -ForegroundColor Green
+            } else {
+                Write-Host "OneDrive installer not found. It might already be uninstalled." -ForegroundColor Yellow
+            }
+        }
+    },
+    @{
+        Name = "windhawk"
+        Category = "Application"
+        Prompt = "Install Windhawk? (Used for advanced Windows UI mods like 'Taskbar on top')"
+        Action = {
+            Write-Host "Installing Windhawk via Winget..." -ForegroundColor Cyan
+            & winget install RamenSoftware.Windhawk --accept-package-agreements --accept-source-agreements --silent
+
+            Write-Host "`n========================================================" -ForegroundColor Magenta
+            Write-Host "Windhawk is installed! Three clicks left, which have to happen in its UI:" -ForegroundColor Magenta
+            Write-Host "1. Click Explore (top of the home screen)." -ForegroundColor Yellow
+            Write-Host "2. Search for 'Taskbar on top' - the mod by m417z." -ForegroundColor Yellow
+            Write-Host "3. Open its details and click Install. It compiles, injects into Explorer, and your taskbar jumps to the top immediately!" -ForegroundColor Yellow
+
+            Write-Host "========================================================`n" -ForegroundColor Magenta
+
+            Write-Host "Launching Windhawk..." -ForegroundColor Cyan
+            $windhawkPaths = @(
+                "$env:LOCALAPPDATA\Programs\Windhawk\windhawk.exe",
+                "$env:PROGRAMFILES\Windhawk\windhawk.exe",
+                "${env:ProgramFiles(x86)}\Windhawk\windhawk.exe"
+            )
+            foreach ($path in $windhawkPaths) {
+                if (Test-Path $path) {
+                    Start-Process $path
+                    break
+                }
+            }
+        }
+    }
+)
+
+Write-Host "Starting Windows 11 Customization...`n"
+$startIndex = 0
+
+if ($StartStep) {
+    $parsed = 0
+    if ([int]::TryParse($StartStep, [ref]$parsed)) {
+        if ($parsed -lt 1 -or $parsed -gt $steps.Length) {
+            throw "Step number $parsed is out of range (1-$($steps.Length))."
+        }
+        $startIndex = $parsed - 1
+    } else {
+        $startIndex = -1
+        for ($j = 0; $j -lt $steps.Length; $j++) {
+            if ($steps[$j].Name -eq $StartStep) { $startIndex = $j; break }
+        }
+        if ($startIndex -lt 0) {
+            throw "Unknown step name '$StartStep'. Valid names: $(($steps | ForEach-Object { $_.Name }) -join ', ')"
+        }
+    }
+    Write-Host "Skipping directly to step '$($steps[$startIndex].Name)' as requested..." -ForegroundColor Yellow
+} elseif (Test-Path $stateFile) {
+    $lastStepName = Get-Content $stateFile | Select-Object -First 1
+    $resumeIndex = -1
+    for ($j = 0; $j -lt $steps.Length; $j++) {
+        if ($steps[$j].Name -eq $lastStepName) { $resumeIndex = $j; break }
+    }
+    if ($resumeIndex -ge 0) {
+        if ($Yolo -or $SetupProfileKey) {
+            Write-Host "Resuming incomplete previous session at step '$lastStepName' [Auto-Confirmed]." -ForegroundColor DarkGreen
+        } else {
+            Write-Host "Previous session was interrupted at step '$lastStepName'. Starting there (earlier steps start unchecked; toggle them back on if you want them)." -ForegroundColor Yellow
+        }
+        $startIndex = $resumeIndex
+    }
+}
+
+$anyChanges = $false
+$quitRequested = $false
+$menuSelection = $null
+
+if (-not $Yolo -and -not $SetupProfileKey) {
+    $preChecked = @()
+    for ($j = $startIndex; $j -lt $steps.Length; $j++) {
+        if (-not $steps[$j].IsGatekeeper) { $preChecked += $steps[$j].Name }
+    }
+    $menuSelection = Show-StepMenu -Steps $steps -CheckedNames $preChecked
+    if ($null -ne $menuSelection -and $menuSelection.Action -eq "Quit") {
+        Write-Host "Quitting script. Nothing was changed." -ForegroundColor Magenta
+        $quitRequested = $true
+    }
+}
+
+if (-not $quitRequested) {
+    if ($null -ne $menuSelection) {
+        # Menu mode: run exactly what was checked, no per-step confirmation.
+        foreach ($step in $steps) {
+            if ($menuSelection.Names -contains $step.Name) {
+                # Save current step to state file in case they forcefully exit (Ctrl+C)
+                Set-Content -Path $stateFile -Value $step.Name
+                $stepColor = $CategoryColors[$step.Category]
+                if (-not $stepColor) { $stepColor = "Cyan" }
+                Write-Host "`n[$($step.Name)] $($step.Prompt)" -ForegroundColor $stepColor
+                & $step.Action
+                $anyChanges = $true
+            }
+        }
+    } else {
+        # Unattended (profile/Yolo) or menu-less fallback: prompt step by step.
+        Write-Host "Options: [Y=Yes / N=No / Esc=Skip / Q=Quit] (Default: Yes)`n" -ForegroundColor Cyan
+
+        for ($i = $startIndex; $i -lt $steps.Length; $i++) {
+            $step = $steps[$i]
+
+            # Save current step to state file in case they forcefully exit (Ctrl+C) or press Q
+            Set-Content -Path $stateFile -Value $step.Name
+
+            $choice = Confirm-Action -StepName $step.Name -Prompt "$($i + 1). [$($step.Name)] $($step.Prompt)"
+
+            if ($choice -eq "Quit") {
+                Write-Host "Quitting script. Progress saved at step '$($step.Name)'. Run the script again to resume." -ForegroundColor Magenta
+                $quitRequested = $true
+                break
+            }
+
+            if ($choice -eq "Yes") {
+                & $step.Action
+                $anyChanges = $true
+            } elseif ($choice -eq "No" -and $step.IsGatekeeper) {
+                Write-Host "Skipping the Advanced Developer Tools section..." -ForegroundColor Yellow
+                break
+            }
+        }
+    }
+}
+
+if (-not $quitRequested) {
+    # The script completed successfully. Delete state file.
+    if (Test-Path $stateFile) {
+        Remove-Item $stateFile -Force
+    }
+
+    if ($anyChanges -or $startIndex -gt 0) {
+        $choice = Confirm-Action -StepName "restart-explorer" -Prompt "Restart Windows Explorer now to apply all changes?"
+        if ($choice -eq "Yes") {
+            Write-Host "Restarting Windows Explorer..." -ForegroundColor Cyan
+            taskkill /f /im explorer.exe
+            Start-Sleep -Seconds 1
+            Start-Process explorer.exe
+        } else {
+            Write-Host "Please restart your computer or sign out to see all changes." -ForegroundColor Yellow
+        }
+    } else {
+        Write-Host "No changes were made."
+    }
+    Write-Host "Done!" -ForegroundColor Green
+}
