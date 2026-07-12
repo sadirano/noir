@@ -140,16 +140,24 @@ function Show-StepMenu {
         Write-Host -NoNewline " / "
         Write-Host "Configuration" -ForegroundColor Cyan
         # Scroll the list inside a viewport when it is taller than the window.
-        $viewRows = [Math]::Min($items.Count, [Console]::WindowHeight - 9)
+        # Row budget: 2 header + 2 detail + 1 status + 1 cursor row; scrolling adds
+        # the two "... more ..." indicator lines.
+        $scrolling = $items.Count -gt ([Console]::WindowHeight - 6)
+        $viewRows = if ($scrolling) { [Math]::Max(3, [Console]::WindowHeight - 8) } else { $items.Count }
+        $redrawLines = $viewRows + 3 + $(if ($scrolling) { 2 } else { 0 })
         $top = 0
         $drawn = $false
         while ($true) {
-            if ($drawn) { [Console]::SetCursorPosition(0, [Console]::CursorTop - ($viewRows + 3)) }
+            if ($drawn) { [Console]::SetCursorPosition(0, [Console]::CursorTop - $redrawLines) }
             $cursorIdx = $selectable[$pos]
             if ($cursorIdx -lt $top) { $top = $cursorIdx }
             if ($cursorIdx -ge $top + $viewRows) { $top = $cursorIdx - $viewRows + 1 }
             $width = [Console]::WindowWidth - 1
             $labelWidth = $width - 26
+            if ($scrolling) {
+                $aboveText = if ($top -gt 0) { "    ... $top more above ..." } else { "" }
+                Write-Host ($aboveText.PadRight($width).Substring(0, $width)) -ForegroundColor DarkGray
+            }
             for ($i = $top; $i -lt $top + $viewRows; $i++) {
                 $item = $items[$i]
                 if ($item.Header) {
@@ -165,6 +173,11 @@ function Show-StepMenu {
                 Write-Host -NoNewline " $pointer $mark " -ForegroundColor $stateColor
                 Write-Host -NoNewline $item.Name.PadRight(19).Substring(0, 19) -ForegroundColor $nameColor
                 Write-Host ((" " + $item.Label).PadRight($labelWidth).Substring(0, $labelWidth)) -ForegroundColor $stateColor
+            }
+            if ($scrolling) {
+                $belowCount = $items.Count - ($top + $viewRows)
+                $belowText = if ($belowCount -gt 0) { "    ... $belowCount more below ..." } else { "" }
+                Write-Host ($belowText.PadRight($width).Substring(0, $width)) -ForegroundColor DarkGray
             }
             # Detail panel: two lines describing the focused item, so the user can
             # deliberate before toggling. Word-wraps to the real console width;
