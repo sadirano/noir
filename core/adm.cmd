@@ -25,4 +25,14 @@ if %errorlevel% equ 0 exit /b 0
 set "ADM_COMMAND=%command%"
 set "ADM_ARGS=%args%"
 powershell -NoProfile -Command "if ($env:ADM_ARGS) { Start-Process -FilePath $env:ADM_COMMAND -ArgumentList $env:ADM_ARGS -Verb RunAs } else { Start-Process -FilePath $env:ADM_COMMAND -Verb RunAs }"
-exit
+
+:: Stop the calling batch script - the `call adm "%~f0"` self-elevation
+:: pattern relies on that - without closing an interactive shell: the empty
+:: parens raise a fatal parse error that aborts the entire batch call stack,
+:: where a plain `exit` would also kill the cmd window whenever adm is typed
+:: at the prompt.
+call :halt 2>nul
+exit /b
+
+:halt
+()

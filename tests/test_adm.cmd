@@ -34,6 +34,9 @@ if %errorlevel% equ 0 (call :pass "command travels via environment variable") el
 findstr /c:"Start-Process" "%ADM%" >nul 2>&1
 if %errorlevel% equ 0 (call :pass "elevates via PowerShell Start-Process") else (call :fail "elevates via PowerShell Start-Process")
 
+findstr /c:"call :halt" "%ADM%" >nul 2>&1
+if %errorlevel% equ 0 (call :pass "stops callers via batch-stack halt, not exit") else (call :fail "stops callers via batch-stack halt, not exit")
+
 :: -- Behavioral test: already-admin path ----------------------
 :: When running as admin, adm.cmd must return to caller via exit /b
 :: without launching anything. We verify by calling it and checking
@@ -60,7 +63,7 @@ if %errorlevel% equ 0 (
 :: actual requoting loop without triggering UAC.
 
 set "DRY=%TEMP%\adm_test_dry.cmd"
-powershell -NoProfile -Command "$repl='echo DRY_COMMAND=%%command%%& echo DRY_ARGS=%%args%%'; $c=Get-Content -LiteralPath $env:ADM; $c=$c -replace '^if .errorlevel. equ 0 exit /b 0$','rem dry-run: elevation short-circuit disabled'; $c=$c -replace '^powershell .*$',$repl; $c=$c -replace '^exit$','exit /b 0'; Set-Content -LiteralPath $env:DRY -Value $c"
+powershell -NoProfile -Command "$repl='echo DRY_COMMAND=%%command%%& echo DRY_ARGS=%%args%%'; $c=Get-Content -LiteralPath $env:ADM; $c=$c -replace '^if .errorlevel. equ 0 exit /b 0$','rem dry-run: elevation short-circuit disabled'; $c=$c -replace '^powershell .*$',$repl; Set-Content -LiteralPath $env:DRY -Value $c"
 
 :: Test: no-arg invocation should target bare cmd with no arguments
 set "DCMD=" & set "DARGS="
@@ -117,8 +120,24 @@ for /f "tokens=1* delims==" %%A in ('call "%MOCK_CALLER%"') do (
 )
 if /i "!DCMD!"=="%MOCK_CALLER%" (call :pass "call adm pattern re-elevates caller script [dry-run]") else (call :fail "call adm pattern re-elevates caller script [dry-run] - got: !DCMD!")
 
+:: Test: after relaunching, adm halts the calling script's batch processing
+:: so the caller never continues running unelevated alongside the elevated
+:: copy. Lines after `call adm` must not execute.
+set "MOCK_CALLER2=%TEMP%\adm_test_caller2.cmd"
+(
+    echo @echo off
+    echo call "%DRY%" "%%~f0"
+    echo echo CALLER_CONTINUED
+) > "%MOCK_CALLER2%"
+set "CONTINUED=0"
+for /f "delims=" %%L in ('call "%MOCK_CALLER2%"') do (
+    if "%%L"=="CALLER_CONTINUED" set "CONTINUED=1"
+)
+if "!CONTINUED!"=="0" (call :pass "caller script stops after relaunch [dry-run]") else (call :fail "caller script stops after relaunch [dry-run]")
+
 del "%DRY%" >nul 2>&1
 del "%MOCK_CALLER%" >nul 2>&1
+del "%MOCK_CALLER2%" >nul 2>&1
 
 :: -- Results --------------------------------------------------
 :results
