@@ -14,8 +14,12 @@ $installDir = if ($env:NOIR_DIR) { $env:NOIR_DIR } else { Join-Path $env:LOCALAP
 
 Write-Host "Installing Noir from github.com/$repo to $installDir..." -ForegroundColor Cyan
 
-$tmp = Join-Path $env:TEMP "noir-install"
-if (Test-Path $tmp) { Remove-Item $tmp -Recurse -Force }
+# A per-run GUID name (rather than a fixed "noir-install") avoids colliding
+# with a leftover directory from a prior run, since a locked/stale one can
+# make cleanup below throw a spurious "path does not exist" mid-Remove-Item
+# (a known PowerShell Remove-Item -Recurse race) and, with
+# $ErrorActionPreference = "Stop", take the whole install down with it.
+$tmp = Join-Path $env:TEMP ("noir-install-" + [guid]::NewGuid().ToString("N"))
 New-Item -ItemType Directory -Path $tmp | Out-Null
 
 $zip = Join-Path $tmp "noir.zip"
@@ -26,7 +30,7 @@ Expand-Archive -Path $zip -DestinationPath $tmp
 # repo files overwrite their older copies.
 New-Item -ItemType Directory -Force -Path $installDir | Out-Null
 Copy-Item (Join-Path $tmp "noir-$branch\*") $installDir -Recurse -Force
-Remove-Item $tmp -Recurse -Force
+Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue
 
 Write-Host "Noir installed to $installDir." -ForegroundColor Green
 # Fresh machines default to the Restricted execution policy, which blocks
