@@ -20,17 +20,25 @@ Write-Host "Installing Noir from github.com/$repo to $installDir..." -Foreground
 # (a known PowerShell Remove-Item -Recurse race) and, with
 # $ErrorActionPreference = "Stop", take the whole install down with it.
 $tmp = Join-Path $env:TEMP ("noir-install-" + [guid]::NewGuid().ToString("N"))
-New-Item -ItemType Directory -Path $tmp | Out-Null
+$tmpCreated = $false
+try {
+    New-Item -ItemType Directory -Path $tmp | Out-Null
+    $tmpCreated = $true
 
-$zip = Join-Path $tmp "noir.zip"
-Invoke-WebRequest -Uri "https://github.com/$repo/archive/refs/heads/$branch.zip" -OutFile $zip -UseBasicParsing
-Expand-Archive -Path $zip -DestinationPath $tmp
+    $zip = Join-Path $tmp "noir.zip"
+    Invoke-WebRequest -Uri "https://github.com/$repo/archive/refs/heads/$branch.zip" -OutFile $zip -UseBasicParsing
+    Expand-Archive -Path $zip -DestinationPath $tmp
 
-# Merge into the install dir: existing files (e.g. your user\ scripts) survive,
-# repo files overwrite their older copies.
-New-Item -ItemType Directory -Force -Path $installDir | Out-Null
-Copy-Item (Join-Path $tmp "noir-$branch\*") $installDir -Recurse -Force
-Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue
+    # Merge into the install dir: existing files (e.g. your user\ scripts) survive,
+    # repo files overwrite their older copies.
+    New-Item -ItemType Directory -Force -Path $installDir | Out-Null
+    Copy-Item (Join-Path $tmp "noir-$branch\*") $installDir -Recurse -Force
+}
+finally {
+    if ($tmpCreated) {
+        Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
 
 Write-Host "Noir installed to $installDir." -ForegroundColor Green
 # Fresh machines default to the Restricted execution policy, which blocks
