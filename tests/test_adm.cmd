@@ -60,7 +60,7 @@ if %errorlevel% equ 0 (
 :: actual requoting loop without triggering UAC.
 
 set "DRY=%TEMP%\adm_test_dry.cmd"
-powershell -NoProfile -Command "$bang=[char]33; $repl='echo DRY_COMMAND=' + $bang + 'command' + $bang + '& echo DRY_ARGS=' + $bang + 'args' + $bang; $c=Get-Content -LiteralPath $env:ADM; $c=$c -replace '^if .errorlevel. equ 0 exit /b 0$','rem dry-run: elevation short-circuit disabled'; $c=$c -replace '^powershell .*$',$repl; $c=$c -replace '^exit$','exit /b 0'; Set-Content -LiteralPath $env:DRY -Value $c"
+powershell -NoProfile -Command "$repl='echo DRY_COMMAND=%%command%%& echo DRY_ARGS=%%args%%'; $c=Get-Content -LiteralPath $env:ADM; $c=$c -replace '^if .errorlevel. equ 0 exit /b 0$','rem dry-run: elevation short-circuit disabled'; $c=$c -replace '^powershell .*$',$repl; $c=$c -replace '^exit$','exit /b 0'; Set-Content -LiteralPath $env:DRY -Value $c"
 
 :: Test: no-arg invocation should target bare cmd with no arguments
 set "DCMD=" & set "DARGS="
@@ -87,6 +87,22 @@ for /f "tokens=1* delims==" %%A in ('call "%DRY%" notepad "C:\path with spaces\f
 )
 set "EXPECT= "C:\path with spaces\file.txt""
 if "!DARGS!"=="!EXPECT!" (call :pass "spaced argument survives requoting [dry-run]") else (call :fail "spaced argument survives requoting [dry-run] - got: !DARGS!")
+
+:: Test: argument containing exclamation marks survives requoting.
+:: Delayed expansion must be off while the ! travels through capture (and
+:: while EXPECT is written literally), then back on so the quoted comparison
+:: parses safely; the result crosses both endlocals via parse-time %-expansion.
+setlocal DisableDelayedExpansion
+set "DARGS="
+for /f "tokens=1* delims==" %%A in ('call "%DRY%" notepad "bang!arg"') do (
+    if "%%A"=="DRY_ARGS" set "DARGS=%%B"
+)
+set "EXPECT= "bang!arg""
+setlocal EnableDelayedExpansion
+set "RESULT=0"
+if "!DARGS!"=="!EXPECT!" set "RESULT=1"
+endlocal & endlocal & set "RESULT=%RESULT%"
+if "%RESULT%"=="1" (call :pass "exclamation-mark argument survives requoting [dry-run]") else (call :fail "exclamation-mark argument survives requoting [dry-run]")
 
 :: Test: self-re-elevation pattern used by env.cmd and hosts.cmd
 set "MOCK_CALLER=%TEMP%\adm_test_caller.cmd"

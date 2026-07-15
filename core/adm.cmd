@@ -1,15 +1,17 @@
 @echo off
-setlocal EnableDelayedExpansion
+setlocal DisableDelayedExpansion
 
 set "command=%~1"
 if not defined command set "command=cmd"
 
 :: Requote each remaining argument so paths with spaces survive the relaunch.
+:: Plain %-expansion works here because goto re-parses the line every
+:: iteration, and unlike delayed expansion it leaves ! in arguments intact.
 set "args="
 :buildArgs
 shift
 if "%~1"=="" goto doneArgs
-set "args=!args! "%~1""
+set "args=%args% "%~1""
 goto buildArgs
 :doneArgs
 
