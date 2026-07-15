@@ -38,17 +38,19 @@ Run it on a fresh machine (plain Windows PowerShell 5.1 is fine):
 .\noir.ps1
 ```
 
-By default it opens an interactive checklist of every setup step, starting
-with nothing selected — navigate with Up/Down (or J/K), Space toggles a step,
-A toggles all, Enter runs the selection, Q quits. Steps are color-coded:
-Visual (magenta), Application/Programs (yellow), Configuration (cyan).
+It opens an interactive checklist of every setup step — navigate with Up/Down
+(or J/K), Space toggles a step, A toggles all, Enter runs the selection, Q
+quits. Steps are color-coded: Visual (magenta), Application/Programs (yellow),
+Configuration (cyan). Noir probes the machine first: steps it detects as
+already set up are marked `ok` and start unchecked, everything missing starts
+checked — so on any machine, Enter runs exactly what's absent. Re-running a
+package step updates it instead of reinstalling.
 
-Fully unattended runs:
+Other modes:
 
 ```powershell
-.\noir.ps1 -Profile dev        # nix | dev | minimal | aesthetic | sadirano
-.\noir.ps1 -Yolo               # accept absolutely everything
-.\noir.ps1 -StartStep scoop-nix  # start at a step, by name or number
+.\noir.ps1 -Yolo     # accept absolutely everything, no checklist
+.\noir.ps1 -Doctor   # report what's already set up; changes nothing
 ```
 
 Highlights of what the steps cover:
@@ -61,10 +63,9 @@ Highlights of what the steps cover:
   ripgrep/fd, PowerShell 7 + PowerToys, OneDrive removal, Windhawk.
 - **Configuration** — nag-screen/ad-personalization opt-outs, **noir-path**
   (puts Noir's `core\` and `user\` folders on PATH), **core-macros** (registers the
-  doskey macros for cmd and the `q`/`cc` functions for PowerShell), Neovim
+  doskey macros for cmd and the `q`/`cc` functions for PowerShell),
+  **noir-alias** (points nix's `noir` alias at this install), Neovim
   config and dotfiles clones, Windows Terminal preferences, git identity.
-
-An interrupted run resumes where it left off on the next launch.
 
 ## Core commands
 
@@ -77,7 +78,6 @@ shell) once `noir-path` has run:
 | `env` | Opens the Environment Variables editor, elevated. |
 | `h` | Hibernates the machine (`shutdown /h`). |
 | `hosts` | Opens the hosts file elevated, honoring `%EDITOR%` (falls back to Notepad). |
-| `mk <dir>` | Creates a directory and cds into it. |
 | `restart` | Kills Explorer, waits for a keypress, restores it. |
 | `u [name[.ext]]` | Creates/edits a personal script in `user\` (see below). |
 
@@ -100,7 +100,8 @@ u               -> opens the user\ folder in the editor
 ```
 
 `u` opens the file via [nix](https://github.com/sadirano/nix)'s `e` command
-(`e user@noir ...`), so the `noir` alias must point at your Noir install.
+(`e user@noir ...`), so the `noir` alias must point at your Noir install —
+the **noir-alias** setup step registers it for you.
 
 ## Tests
 
