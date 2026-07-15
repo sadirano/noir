@@ -1,0 +1,2 @@
+[actions]
+test = 'tests\run_tests.cmd'

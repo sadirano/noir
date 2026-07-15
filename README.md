@@ -106,10 +106,13 @@ the **noir-alias** setup step registers it for you.
 ## Tests
 
 ```
-tests\test_adm.cmd
+tests\run_tests.cmd
 ```
 
-Structural and dry-run tests for the elevation primitive (no UAC prompts).
+Runs every suite: structural and dry-run tests for the elevation primitive
+(no UAC prompts), structural checks for the other core commands and macros,
+and noir.ps1 checks — parse, step-table shape via the AST, and a read-only
+`-Doctor` run. Suites also run individually (`tests\test_adm.cmd`, ...).
 
 ## Dependencies
 
