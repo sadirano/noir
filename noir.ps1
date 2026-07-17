@@ -312,19 +312,6 @@ $steps = @(
         }
     },
     @{
-        Name = "clear-taskbar"
-        Category = "Visual"
-        Prompt = "Remove all shortcuts from the taskbar?"
-        Detail = "Unpins everything for a minimal taskbar - the Noir workflow launches apps from Win+R instead. Repin favorites anytime. Skip if you rely on pins."
-        Action = {
-            Write-Host "Removing Taskbar Pinned Items..." -ForegroundColor Cyan
-            $taskbandPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Taskband"
-            if (Test-Path $taskbandPath) {
-                Remove-Item -Path $taskbandPath -Recurse -Force
-            }
-        }
-    },
-    @{
         Name = "taskbar-autohide"
         Category = "Visual"
         Prompt = "Enable Auto-Hide for Taskbar?"
