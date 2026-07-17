@@ -436,11 +436,23 @@ public class Wallpaper {
         Name = "core-macros"
         Category = "Configuration"
         Prompt = "Register Noir core macros (doskey cc/q for cmd, q/cc functions for PowerShell)?"
-        Detail = "Appends doskey.mac to cmd's AutoRun and dot-sources core.ps1 from your PowerShell profiles: cc copies the current path to the clipboard, q exits the shell. Skip if you curate your own profiles."
+        Detail = "Appends doskey.mac to cmd's AutoRun and dot-sources core.ps1 from your PowerShell profiles (cc copies the current path, q exits the shell); entries left over from an old install path are repaired in place. Skip if you curate your own profiles."
         Check = {
+            # Matching just the marker/filename isn't enough: a profile line left
+            # over from an old install path still matches while the file it points
+            # at is gone. Verify the registered paths point at *this* install.
+            $macFile = Join-Path $PSScriptRoot "core\doskey.mac"
+            $corePs1 = Join-Path $PSScriptRoot "core\core.ps1"
             $autoRun = (Get-ItemProperty -Path "HKCU:\Software\Microsoft\Command Processor" -Name AutoRun -ErrorAction SilentlyContinue).AutoRun
-            $profilePath = Join-Path ([Environment]::GetFolderPath("MyDocuments")) "WindowsPowerShell\profile.ps1"
-            ($autoRun -match 'doskey\.mac') -and (Test-Path $profilePath) -and (Select-String -Path $profilePath -SimpleMatch "# noir-core" -Quiet)
+            if (-not ($autoRun -match [regex]::Escape($macFile))) { return $false }
+            $docs = [Environment]::GetFolderPath("MyDocuments")
+            $profileDirs = @(Join-Path $docs "WindowsPowerShell")
+            if (Get-Command pwsh -ErrorAction SilentlyContinue) { $profileDirs += Join-Path $docs "PowerShell" }
+            foreach ($dir in $profileDirs) {
+                $profilePath = Join-Path $dir "profile.ps1"
+                if (-not ((Test-Path $profilePath) -and (Select-String -Path $profilePath -SimpleMatch $corePs1 -Quiet))) { return $false }
+            }
+            $true
         }
         Action = {
             $coreDir = Join-Path $PSScriptRoot "core"
@@ -450,8 +462,17 @@ public class Wallpaper {
             $macFile = Join-Path $coreDir "doskey.mac"
             $macroCmd = "doskey /macrofile=`"$macFile`""
             $autoRun = (Get-ItemProperty -Path $key -Name AutoRun -ErrorAction SilentlyContinue).AutoRun
-            if ($autoRun -match 'doskey\.mac') {
-                Write-Host "cmd AutoRun already loads doskey.mac - skipping." -ForegroundColor Green
+            if ($autoRun -match [regex]::Escape($macFile)) {
+                Write-Host "cmd AutoRun already loads this doskey.mac - skipping." -ForegroundColor Green
+            } elseif ($autoRun -match 'doskey\.mac') {
+                # A doskey.mac entry from an old install path: rewrite it in place.
+                $updated = $autoRun -replace '\S*doskey(?:\.exe)?\s+/macrofile=(?:"[^"]*doskey\.mac"|\S*doskey\.mac)', $macroCmd
+                if ($updated -eq $autoRun) {
+                    # Unrecognized shape; append the correct command instead.
+                    $updated = "$autoRun & $macroCmd"
+                }
+                Set-ItemProperty -Path $key -Name AutoRun -Value $updated
+                Write-Host "Updated cmd AutoRun to load $macFile." -ForegroundColor Green
             } else {
                 if (!(Test-Path $key)) { New-Item -Path $key -Force | Out-Null }
                 # Append rather than overwrite: other tools (e.g. clink) hook AutoRun too.
@@ -471,9 +492,20 @@ public class Wallpaper {
             }
             foreach ($dir in $profileDirs) {
                 $profilePath = Join-Path $dir "profile.ps1"
-                if ((Test-Path $profilePath) -and (Select-String -Path $profilePath -SimpleMatch $marker -Quiet)) {
-                    Write-Host "PowerShell profile already loads core.ps1 - skipping ($profilePath)." -ForegroundColor Green
-                    continue
+                if (Test-Path $profilePath) {
+                    if (Select-String -Path $profilePath -SimpleMatch $corePs1 -Quiet) {
+                        Write-Host "PowerShell profile already loads core.ps1 - skipping ($profilePath)." -ForegroundColor Green
+                        continue
+                    }
+                    if (Select-String -Path $profilePath -SimpleMatch $marker -Quiet) {
+                        # A noir-core line pointing at an old install path: rewrite it in place.
+                        $content = @(Get-Content $profilePath) | ForEach-Object {
+                            if ($_ -like "*$marker*") { $line } else { $_ }
+                        }
+                        Set-Content -Path $profilePath -Value $content -Encoding utf8
+                        Write-Host "Updated stale noir-core line in $profilePath." -ForegroundColor Green
+                        continue
+                    }
                 }
                 New-Item -ItemType Directory -Force -Path $dir | Out-Null
                 Add-Content -Path $profilePath -Value $line
