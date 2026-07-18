@@ -512,7 +512,7 @@ public class Wallpaper {
         Name = "scoop-nix"
         Category = "Application"
         Prompt = "Install Scoop and your Nix project?"
-        Detail = "Installs the Scoop package manager, adds the sadirano bucket, and installs nix (directory aliases: o/e/r/sg...). Pulls bat, fzf, ripgrep, fd, Neovim, and clink along as dependencies."
+        Detail = "Installs the Scoop package manager, adds the sadirano bucket, and installs nix (directory aliases: o/e/r/sg...). nix leans on bat, fzf, ripgrep, fd, and Neovim at runtime, but the Scoop package no longer pulls them in - take those steps too."
         Check = { Test-CommandExists nix }
         Action = {
             Write-Host "Checking for Scoop..." -ForegroundColor Cyan
@@ -585,7 +585,7 @@ public class Wallpaper {
         Name = "neovim"
         Category = "Application"
         Prompt = "Install Neovim?"
-        Detail = "Standalone Neovim via Scoop. Redundant if you take the scoop-nix step - nix already brings Neovim as a dependency."
+        Detail = "Standalone Neovim via Scoop. nix leans on it but no longer pulls it in as a Scoop dependency - take this step even if you took scoop-nix."
         Check = { Test-CommandExists nvim }
         Action = {
             Install-ScoopApp neovim
@@ -595,7 +595,7 @@ public class Wallpaper {
         Name = "bat"
         Category = "Application"
         Prompt = "Install bat (cat with syntax highlighting)?"
-        Detail = "Nicer file previews in the terminal. Redundant if you take the scoop-nix step - it arrives as a nix dependency."
+        Detail = "Nicer file previews in the terminal, used by nix's sg/s previews. nix leans on it but no longer pulls it in as a Scoop dependency - take this step even if you took scoop-nix."
         Check = { Test-CommandExists bat }
         Action = {
             Install-ScoopApp bat
@@ -605,10 +605,20 @@ public class Wallpaper {
         Name = "fzf"
         Category = "Application"
         Prompt = "Install fzf (fuzzy finder, used by nix's pickers)?"
-        Detail = "The fuzzy picker behind nix's sg/ff and many shell workflows. Redundant if you take the scoop-nix step - it arrives as a nix dependency."
+        Detail = "The fuzzy picker behind nix's sg/ff and many shell workflows. nix leans on it but no longer pulls it in as a Scoop dependency - take this step even if you took scoop-nix."
         Check = { Test-CommandExists fzf }
         Action = {
             Install-ScoopApp fzf
+        }
+    },
+    @{
+        Name = "ripgrep-fd"
+        Category = "Application"
+        Prompt = "Install ripgrep (rg) and fd? (Mandatory for fast Telescope searches)"
+        Detail = "rg and fd power fast Telescope searches in Neovim, and nix's sg/ff/picker fallback lean on them too - cheap, broadly useful CLI staples. No longer pulled in as a Scoop dependency of nix - take this step even if you took scoop-nix."
+        Check = { (Test-CommandExists rg) -and (Test-CommandExists fd) }
+        Action = {
+            Install-ScoopApp ripgrep, fd
         }
     },
     @{
@@ -846,16 +856,6 @@ public class Wallpaper {
         Check = { (Test-CommandExists gcc) -and (Test-CommandExists make) }
         Action = {
             Install-ScoopApp gcc, make, tree-sitter
-        }
-    },
-    @{
-        Name = "ripgrep-fd"
-        Category = "Application"
-        Prompt = "Install ripgrep (rg) and fd? (Mandatory for fast Telescope searches)"
-        Detail = "rg and fd power fast Telescope searches in Neovim and are cheap, broadly useful CLI staples (also nix dependencies)."
-        Check = { (Test-CommandExists rg) -and (Test-CommandExists fd) }
-        Action = {
-            Install-ScoopApp ripgrep, fd
         }
     },
     @{
