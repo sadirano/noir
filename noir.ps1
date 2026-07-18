@@ -366,18 +366,25 @@ public class Wallpaper {
         Detail = "Registry opt-outs for the 'finish setting up your device' screen, tips, and personalized-ads ID. Purely less noise; rarely worth skipping."
         Check = {
             ((Get-ItemProperty -Path "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\UserProfileEngagement" -ErrorAction SilentlyContinue).ScoobeSystemSettingEnabled -eq 0) -and
+            ((Get-ItemProperty -Path "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\ContentDeliveryManager" -ErrorAction SilentlyContinue).'SubscribedContent-310093Enabled' -eq 0) -and
+            ((Get-ItemProperty -Path "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Privacy" -ErrorAction SilentlyContinue).TailoredExperiencesWithDiagnosticDataEnabled -eq 0) -and
             ((Get-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\AdvertisingInfo" -ErrorAction SilentlyContinue).Enabled -eq 0)
         }
         Action = {
             Write-Host "Disabling setup nag screens and ad personalization..." -ForegroundColor Cyan
-            # Disable 'Let's finish setting up your device'
-            Set-ItemProperty -Path "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\UserProfileEngagement" -Name "ScoobeSystemSettingEnabled" -Value 0 -Type DWord -Force -ErrorAction SilentlyContinue
-            # Disable Windows Welcome Experience
-            Set-ItemProperty -Path "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\ContentDeliveryManager" -Name "SubscribedContent-310093Enabled" -Value 0 -Type DWord -Force -ErrorAction SilentlyContinue
-            # Disable Tailored Experiences (Diagnostic Data)
-            Set-ItemProperty -Path "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Privacy" -Name "TailoredExperiencesWithDiagnosticDataEnabled" -Value 0 -Type DWord -Force -ErrorAction SilentlyContinue
-            # Disable Advertising ID
-            Set-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\AdvertisingInfo" -Name "Enabled" -Value 0 -Type DWord -Force -ErrorAction SilentlyContinue
+            # Set-ItemProperty fails silently (with -ErrorAction SilentlyContinue) when
+            # the key doesn't exist yet, which left the values unset and the Check above
+            # permanently false - re-nagging on every run. Create each key first.
+            $regValues = @(
+                @{ Path = "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\UserProfileEngagement"; Name = "ScoobeSystemSettingEnabled" },       # 'Let's finish setting up your device'
+                @{ Path = "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\ContentDeliveryManager"; Name = "SubscribedContent-310093Enabled" }, # Windows Welcome Experience
+                @{ Path = "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Privacy"; Name = "TailoredExperiencesWithDiagnosticDataEnabled" },   # Tailored Experiences (Diagnostic Data)
+                @{ Path = "HKCU:\Software\Microsoft\Windows\CurrentVersion\AdvertisingInfo"; Name = "Enabled" }                                # Advertising ID
+            )
+            foreach ($reg in $regValues) {
+                if (!(Test-Path $reg.Path)) { New-Item -Path $reg.Path -Force | Out-Null }
+                Set-ItemProperty -Path $reg.Path -Name $reg.Name -Value 0 -Type DWord -Force
+            }
 
             Write-Host "Disabled successfully!" -ForegroundColor Green
         }
@@ -605,35 +612,30 @@ public class Wallpaper {
         }
     },
     @{
-        Name = "rga"
-        Category = "Application"
-        Prompt = "Install ripgrep-all (rga - search inside PDFs, office docs, archives; powers nix's 'sg --all')?"
-        Detail = "Optional nix companion: lets 'sg --all' grep inside PDFs, office documents, and archives. Skip if plain-text search covers your needs."
-        Check = { Test-CommandExists rga }
-        Action = {
-            Install-ScoopApp rga
-        }
-    },
-    @{
         Name = "terminal-fonts"
         Category = "Application"
-        Prompt = "Install Windows Terminal and Nerd Fonts?"
-        Detail = "Installs Windows Terminal (if missing) plus the Mononoki Nerd Font - the icons and glyphs the terminal config and Neovim UI expect."
+        Prompt = "Install Nerd Fonts, and Windows Terminal from the Microsoft Store if missing?"
+        Detail = "Installs the Mononoki Nerd Font via Scoop - the icons and glyphs the terminal config and Neovim UI expect. Windows Terminal itself is installed from the Microsoft Store, not Scoop: Scoop's build is a portable extraction that doesn't register as a proper default-terminal candidate, which breaks the terminal-config step below."
         Check = { (Test-Path "$env:USERPROFILE\scoop\apps\Mononoki-NF-Mono") -and (Test-CommandExists wt) }
         Action = {
             $scoopCmd = Get-ScoopCmd
 
-            Write-Host "Adding 'nerd-fonts' and 'extras' buckets..." -ForegroundColor Cyan
+            Write-Host "Adding 'nerd-fonts' bucket..." -ForegroundColor Cyan
             & $scoopCmd bucket add nerd-fonts
-            & $scoopCmd bucket add extras
 
             Install-ScoopApp nerd-fonts/Mononoki-NF-Mono
 
             if (Get-Command wt -ErrorAction SilentlyContinue) {
-                Write-Host "Windows Terminal is already installed on this system. Skipping Scoop installation." -ForegroundColor Yellow
+                Write-Host "Windows Terminal is already installed on this system." -ForegroundColor Yellow
             } else {
-                Write-Host "Installing Windows Terminal..." -ForegroundColor Cyan
-                & $scoopCmd install extras/windows-terminal
+                Write-Host "Windows Terminal is not installed. Scoop's build is a portable extraction and won't register properly as the system default terminal, so install it from the Microsoft Store instead:" -ForegroundColor Yellow
+                Write-Host "  https://apps.microsoft.com/detail/9n0dx20hk701?hl=en-US&gl=BR" -ForegroundColor Cyan
+                if ($Yolo) {
+                    Write-Host "Yolo mode can't wait for a manual install; continuing without Windows Terminal." -ForegroundColor Yellow
+                } else {
+                    Write-Host "Press any key once Windows Terminal is installed to continue..." -ForegroundColor DarkGray
+                    try { [Console]::ReadKey($true) | Out-Null } catch { Read-Host | Out-Null }
+                }
             }
         }
     },
@@ -756,7 +758,7 @@ public class Wallpaper {
                 $settings.profiles.defaults | Add-Member -MemberType NoteProperty -Name "colorScheme" -Value "Tokyo Night" -Force
                 $settings.profiles.defaults | Add-Member -MemberType NoteProperty -Name "opacity" -Value 89 -Force
 
-                $settings.profiles.defaults | Add-Member -MemberType NoteProperty -Name "font" -Value ([PSCustomObject]@{face="Mononoki Nerd Font Mono"; size=16; weight="bold"}) -Force
+                $settings.profiles.defaults | Add-Member -MemberType NoteProperty -Name "font" -Value ([PSCustomObject]@{face="Mononoki Nerd Font Mono"; size=12; weight="bold"}) -Force
 
                 $hasTokyoNight = $false
                 if ($null -ne $settings.schemes) {
@@ -995,6 +997,16 @@ public class Wallpaper {
                 }
             }
         }
+    },
+    @{
+        Name = "rga"
+        Category = "Application"
+        Prompt = "Install ripgrep-all (rga - search inside PDFs, office docs, archives; powers nix's 'sg --all')?"
+        Detail = "Niche nix companion: lets 'sg --all' grep inside PDFs, office documents, and archives. Skip if plain-text search covers your needs."
+        Check = { Test-CommandExists rga }
+        Action = {
+            Install-ScoopApp rga
+        }
     }
 )
 
@@ -1002,6 +1014,14 @@ Write-Host "Starting Windows 11 Customization...`n"
 
 # Probe what is already set up so the checklist (and -Doctor) can show it.
 foreach ($step in $steps) { $step.Status = Get-StepStatus $step }
+
+# Tag every step after the "dev-tools" gatekeeper as advanced, so it can be
+# excluded from the default pre-checked selection below.
+$inAdvanced = $false
+foreach ($step in $steps) {
+    if ($step.IsGatekeeper) { $inAdvanced = $true; continue }
+    $step.IsAdvanced = $inAdvanced
+}
 
 if ($Doctor) {
     Write-Host "Noir doctor - detected state of each step:`n" -ForegroundColor Cyan
@@ -1028,8 +1048,9 @@ $quitRequested = $false
 $menuSelection = $null
 
 if (-not $Yolo) {
-    # Pre-check only what isn't already set up.
-    $preChecked = @($steps | Where-Object { -not $_.IsGatekeeper -and $_.Status -ne $true } | ForEach-Object { $_.Name })
+    # Pre-check only what isn't already set up. Advanced (heavy, niche, case-by-case)
+    # steps are opt-in only - never pre-checked, even when missing.
+    $preChecked = @($steps | Where-Object { -not $_.IsGatekeeper -and -not $_.IsAdvanced -and $_.Status -ne $true } | ForEach-Object { $_.Name })
     $menuSelection = Show-StepMenu -Steps $steps -CheckedNames $preChecked
     if ($null -ne $menuSelection -and $menuSelection.Action -eq "Quit") {
         Write-Host "Quitting script. Nothing was changed." -ForegroundColor Magenta
