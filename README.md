@@ -58,14 +58,14 @@ Highlights of what the steps cover:
 - **Visual** — dark mode, hidden desktop icons, taskbar cleanup/auto-hide,
   solid black wallpaper.
 - **Application** — Scoop + the sadirano bucket (nix, which brings Neovim),
-  clink wired to the core doskey macros, standalone Neovim/bat/fzf/ripgrep-all
+  clink hooked into cmd (tuned for startup cost), standalone Neovim/bat/fzf/ripgrep-all
   picks, Windows Terminal + Nerd Fonts, Node.js, Python, C build tools,
   ripgrep/fd, PowerShell 7 + PowerToys, OneDrive removal, Windhawk.
 - **Configuration** — nag-screen/ad-personalization opt-outs, **noir-path**
   (puts Noir's `core\` and `user\` folders on PATH), **core-macros** (registers the
-  doskey macros for cmd and the `q`/`cc` functions for PowerShell),
-  **noir-alias** (points nix's `noir` alias at this install), Neovim
-  config and dotfiles clones, Windows Terminal preferences, git identity.
+  `q`/`cc` functions for PowerShell), **noir-alias** (points nix's `noir` alias
+  at this install), Neovim config and dotfiles clones, Windows Terminal
+  preferences, git identity.
 
 ## Core commands
 
@@ -75,15 +75,32 @@ shell) once `noir-path` has run:
 | Command | What it does |
 |---|---|
 | `adm [cmd] [args]` | Elevation primitive. `call adm "%~f0"` at the top of a script re-launches it elevated; bare `adm` opens an elevated cmd. |
+| `cc` | Copies the current directory to the clipboard. |
 | `env` | Opens the Environment Variables editor, elevated. |
 | `h` | Hibernates the machine (`shutdown /h`). |
 | `hosts` | Opens the hosts file elevated, honoring `%EDITOR%` (falls back to Notepad). |
+| `q` | Exits the shell. |
 | `restart` | Kills Explorer, waits for a keypress, restores it. |
 | `u [name[.ext]]` | Creates/edits a personal script in `user\` (see below). |
 
-Macros registered by the **core-macros** step (cmd via `doskey.mac`,
-PowerShell via `core.ps1`): `cc` copies the current directory to the
-clipboard, `q` exits the shell.
+`q` and `cc` are plain `.cmd` files rather than doskey macros, so cmd pays
+nothing for them until they are typed. PowerShell gets the same two as
+functions from `core.ps1`, wired in by the **core-macros** step.
+
+### Startup cost
+
+Everything cmd runs at startup runs on *every* shell, including nested ones,
+so the hooks here are kept lean:
+
+- `q`/`cc` are files on PATH, not a `doskey /macrofile` in AutoRun (which
+  spawned `doskey.exe` per shell).
+- clink's AutoRun entry points straight at its loader `.exe`, skipping the
+  `clink.bat` wrapper that only exists to pick an architecture.
+- clink runs with `--nolog` and an empty `clink.autostart`.
+
+On the development machine these took a cmd start from ~46 ms to ~30 ms.
+Re-running `noir.ps1` repairs an older install: both the **core-macros** and
+**clink** steps report themselves unconfigured until the tunings are present.
 
 ## User scripts: the `user\` folder
 

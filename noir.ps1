@@ -429,16 +429,18 @@ public class Wallpaper {
     @{
         Name = "core-macros"
         Category = "Configuration"
-        Prompt = "Register Noir core macros (doskey cc/q for cmd, q/cc functions for PowerShell)?"
-        Detail = "Appends doskey.mac to cmd's AutoRun and dot-sources core.ps1 from your PowerShell profiles (cc copies the current path, q exits the shell); entries left over from an old install path are repaired in place. Skip if you curate your own profiles."
+        Prompt = "Register Noir core macros (q/cc functions for PowerShell)?"
+        Detail = "Dot-sources core.ps1 from your PowerShell profiles (cc copies the current path, q exits the shell); entries left over from an old install path are repaired in place. cmd gets the same two commands from core\q.cmd and core\cc.cmd on PATH, so this step also strips the old doskey.mac hook out of cmd's AutoRun. Skip if you curate your own profiles."
         Check = {
             # Matching just the marker/filename isn't enough: a profile line left
             # over from an old install path still matches while the file it points
             # at is gone. Verify the registered paths point at *this* install.
-            $macFile = Join-Path $PSScriptRoot "core\doskey.mac"
             $corePs1 = Join-Path $PSScriptRoot "core\core.ps1"
+            # An AutoRun still loading a doskey.mac is a pre-shim install: it costs
+            # a doskey.exe spawn in every cmd start for two commands that are now
+            # .cmd files on PATH. Report unconfigured so the migration below runs.
             $autoRun = (Get-ItemProperty -Path "HKCU:\Software\Microsoft\Command Processor" -Name AutoRun -ErrorAction SilentlyContinue).AutoRun
-            if (-not ($autoRun -match [regex]::Escape($macFile))) { return $false }
+            if ($autoRun -match 'doskey\.mac') { return $false }
             $docs = [Environment]::GetFolderPath("MyDocuments")
             $profileDirs = @(Join-Path $docs "WindowsPowerShell")
             if (Get-Command pwsh -ErrorAction SilentlyContinue) { $profileDirs += Join-Path $docs "PowerShell" }
@@ -451,28 +453,26 @@ public class Wallpaper {
         Action = {
             $coreDir = Join-Path $PSScriptRoot "core"
 
-            # cmd: doskey macros via AutoRun
+            # cmd: nothing to register. `q` and `cc` are core\q.cmd and
+            # core\cc.cmd, found on PATH by the noir-path step, so they cost
+            # nothing until they are typed. What IS needed is undoing the old
+            # arrangement: a doskey /macrofile in AutoRun spawned doskey.exe on
+            # every cmd start (~6 ms) to define the same two commands.
             $key = "HKCU:\Software\Microsoft\Command Processor"
-            $macFile = Join-Path $coreDir "doskey.mac"
-            $macroCmd = "doskey /macrofile=`"$macFile`""
             $autoRun = (Get-ItemProperty -Path $key -Name AutoRun -ErrorAction SilentlyContinue).AutoRun
-            if ($autoRun -match [regex]::Escape($macFile)) {
-                Write-Host "cmd AutoRun already loads this doskey.mac - skipping." -ForegroundColor Green
-            } elseif ($autoRun -match 'doskey\.mac') {
-                # A doskey.mac entry from an old install path: rewrite it in place.
-                $updated = $autoRun -replace '\S*doskey(?:\.exe)?\s+/macrofile=(?:"[^"]*doskey\.mac"|\S*doskey\.mac)', $macroCmd
-                if ($updated -eq $autoRun) {
-                    # Unrecognized shape; append the correct command instead.
-                    $updated = "$autoRun & $macroCmd"
+            if ($autoRun -match 'doskey\.mac') {
+                # Strip the doskey command, then tidy the separators it leaves
+                # behind. AutoRun is shared - clink hooks it too - so only the
+                # doskey clause goes, never the whole value.
+                $stripped = $autoRun -replace '\S*doskey(?:\.exe)?\s+/macrofile=(?:"[^"]*doskey\.mac"|\S*doskey\.mac)', ''
+                $stripped = ($stripped -replace '^\s*&\s*', '' -replace '\s*&\s*$', '' -replace '\s*&\s*&\s*', ' & ').Trim()
+                if ($stripped) {
+                    Set-ItemProperty -Path $key -Name AutoRun -Value $stripped
+                    Write-Host "Removed the doskey.mac hook from cmd AutoRun (q/cc now come from core\*.cmd)." -ForegroundColor Green
+                } else {
+                    Remove-ItemProperty -Path $key -Name AutoRun -ErrorAction SilentlyContinue
+                    Write-Host "Removed cmd AutoRun entirely - the doskey.mac hook was all it did." -ForegroundColor Green
                 }
-                Set-ItemProperty -Path $key -Name AutoRun -Value $updated
-                Write-Host "Updated cmd AutoRun to load $macFile." -ForegroundColor Green
-            } else {
-                if (!(Test-Path $key)) { New-Item -Path $key -Force | Out-Null }
-                # Append rather than overwrite: other tools (e.g. clink) hook AutoRun too.
-                $new = if ($autoRun) { "$autoRun & $macroCmd" } else { $macroCmd }
-                Set-ItemProperty -Path $key -Name AutoRun -Value $new
-                Write-Host "Registered doskey macros in cmd AutoRun." -ForegroundColor Green
             }
 
             # PowerShell: dot-source core.ps1 from the user profile(s)
@@ -564,21 +564,61 @@ public class Wallpaper {
     @{
         Name = "clink"
         Category = "Application"
-        Prompt = "Install clink (cmd autosuggestions) and hook the core doskey macros into it?"
-        Detail = "clink gives cmd fish-style autosuggestions and sane line editing; this wires it into every cmd session and autoloads the core macros through it. Skip if you never live in cmd."
-        Check = { Test-CommandExists clink }
+        Prompt = "Install clink (cmd autosuggestions) and wire it into cmd as cheaply as possible?"
+        Detail = "clink gives cmd fish-style autosuggestions and sane line editing; this wires it into every cmd session. The hook is tuned for startup cost: it calls clink's loader .exe directly rather than through clink.bat, disables file logging, and leaves clink.autostart empty (q/cc come from core\*.cmd on PATH, not a doskey spawn). Skip if you never live in cmd."
+        Check = {
+            if (-not (Test-CommandExists clink)) { return $false }
+            # Installed is not enough - an older noir configured clink in a way
+            # that costs ~13 ms on every cmd start. Report unconfigured unless
+            # all three tunings are in place, so re-running repairs them.
+            $autoRun = (Get-ItemProperty -Path "HKCU:\Software\Microsoft\Command Processor" -Name AutoRun -ErrorAction SilentlyContinue).AutoRun
+            if ($autoRun -notmatch 'clink_(x64|x86|arm64)\.exe') { return $false }
+            if ($autoRun -notmatch '--nolog') { return $false }
+            $clinkCmd = "$env:USERPROFILE\scoop\shims\clink.cmd"
+            if (!(Test-Path $clinkCmd)) { $clinkCmd = "clink" }
+            $autostart = (& $clinkCmd set clink.autostart 2>$null) -join " "
+            if ($autostart -match 'doskey') { return $false }
+            $true
+        }
         Action = {
             Install-ScoopApp clink
 
             $clinkCmd = "$env:USERPROFILE\scoop\shims\clink.cmd"
             if (!(Test-Path $clinkCmd)) { $clinkCmd = "clink" }
+            $key = "HKCU:\Software\Microsoft\Command Processor"
 
-            $macFile = Join-Path $PSScriptRoot "core\doskey.mac"
-            & $clinkCmd autorun install | Out-Null
-            & $clinkCmd set clink.autostart "$env:SystemRoot\System32\doskey.exe /macrofile=$macFile" | Out-Null
+            # --nolog: clink writes clink.log on every injection (~3 ms of I/O
+            # for a file only used to diagnose clink itself).
+            & $clinkCmd autorun install -- --nolog | Out-Null
+
+            # autorun install registers clink.bat, a batch wrapper whose only job
+            # is picking the loader for this architecture - and cmd re-parses it
+            # on every single start (~5 ms). Resolve it once here instead.
+            $autoRun = (Get-ItemProperty -Path $key -Name AutoRun -ErrorAction SilentlyContinue).AutoRun
+            if ($autoRun -match '"?([A-Za-z]:\\[^"]*?)\\clink\.bat"?\s+inject') {
+                $clinkDir = $matches[1]
+                # Mirrors clink.bat's own choice, including the 32-bit-process-on-
+                # 64-bit-Windows case it handles via PROCESSOR_ARCHITEW6432.
+                $loader = if ($env:PROCESSOR_ARCHITEW6432) { "clink_x86.exe" }
+                    elseif ($env:PROCESSOR_ARCHITECTURE -ieq "x86") { "clink_x86.exe" }
+                    elseif ($env:PROCESSOR_ARCHITECTURE -ieq "arm64") { "clink_arm64.exe" }
+                    else { "clink_x64.exe" }
+                $bat = Join-Path $clinkDir "clink.bat"
+                $exe = Join-Path $clinkDir $loader
+                if (Test-Path $exe) {
+                    Set-ItemProperty -Path $key -Name AutoRun -Value $autoRun.Replace($bat, $exe)
+                    Write-Host "cmd AutoRun points straight at $loader (skips the clink.bat wrapper)." -ForegroundColor Green
+                } else {
+                    Write-Host "Could not find $loader; leaving the clink.bat hook in place." -ForegroundColor Yellow
+                }
+            }
+
+            # Empty, not a doskey spawn: q/cc are core\q.cmd and core\cc.cmd on
+            # PATH. Set explicitly so an install carrying the old value is repaired.
+            & $clinkCmd set clink.autostart "" | Out-Null
             & $clinkCmd set clink.logo none | Out-Null
             & $clinkCmd set autosuggest.inline true | Out-Null
-            Write-Host "clink installed; autorun and core macros configured." -ForegroundColor Green
+            Write-Host "clink installed and wired into cmd." -ForegroundColor Green
         }
     },
     @{

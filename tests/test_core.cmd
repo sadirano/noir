@@ -11,7 +11,7 @@ echo.
 
 :: -- Every command exists and silences command echo ------------
 
-for %%F in (adm env h hosts restart u) do (
+for %%F in (adm cc env h hosts q restart u) do (
     if exist "%CORE%\%%F.cmd" (
         call :pass "%%F.cmd exists"
         set "FIRST="
@@ -39,13 +39,17 @@ call :expect restart.cmd "pause" "restart waits for a keypress"
 
 call :expect u.cmd "user@noir" "u edits through the nix noir alias"
 
-:: -- Macro definitions stay in sync (cmd and PowerShell) -------
+:: -- q/cc stay in sync (cmd shims and PowerShell) --------------
 
-if exist "%CORE%\doskey.mac" (call :pass "doskey.mac exists") else (call :fail "doskey.mac exists")
-findstr /b /l /c:"cc=" "%CORE%\doskey.mac" >nul 2>&1
-if %errorlevel% equ 0 (call :pass "doskey.mac defines cc") else (call :fail "doskey.mac defines cc")
-findstr /b /l /c:"q=" "%CORE%\doskey.mac" >nul 2>&1
-if %errorlevel% equ 0 (call :pass "doskey.mac defines q") else (call :fail "doskey.mac defines q")
+:: q must end the shell, so plain `exit` - `exit /b` would only return from
+:: the script and leave the prompt open.
+call :expect q.cmd "exit" "q.cmd exits"
+findstr /b /l /c:"exit /b" "%CORE%\q.cmd" >nul 2>&1
+if %errorlevel% neq 0 (call :pass "q.cmd uses exit, not exit /b") else (call :fail "q.cmd uses exit, not exit /b")
+call :expect cc.cmd "clip" "cc.cmd copies to the clipboard"
+
+:: The doskey.mac these replaced cost a doskey.exe spawn per cmd start.
+if not exist "%CORE%\doskey.mac" (call :pass "no doskey.mac to load at startup") else (call :fail "no doskey.mac to load at startup")
 
 if exist "%CORE%\core.ps1" (call :pass "core.ps1 exists") else (call :fail "core.ps1 exists")
 findstr /l /c:"function cc" "%CORE%\core.ps1" >nul 2>&1
